@@ -26,6 +26,12 @@ app.add_middleware(
     expose_headers=["*"]     
 )
 
+from onlygpt import iterate_many_times
+
+@app.get("/")
+async def test():
+    return "Test working"
+
 @app.post("/convert_audio")
 async def convert_audio(file: UploadFile):
     """
@@ -45,9 +51,13 @@ async def convert_audio(file: UploadFile):
                 response_format="text"
             )
 
-            return {"transcript": transcript}
         except Exception as e:
             return Response({"error": "Error de response OpenAI", "error_detail":e.args}, 400)
+        
+        new_message = iterate_many_times(transcript, 3)
+
+        return new_message
+
     except Exception as e:
         print(e)
         return {"error": "Ocurrió un error al procesar el audio.", "error_detail": e}

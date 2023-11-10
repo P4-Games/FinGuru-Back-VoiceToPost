@@ -29,5 +29,4 @@ def iterate_many_times(message, times):
     
     return new_message
 
-
-print(iterate_many_times("Hubo un choque en callao y santa fe, creo que el conductor estaba ebrio, no hubo muertos", 3))
+#print(iterate_many_times("Hubo un choque en callao y santa fe, creo que el conductor estaba ebrio, no hubo muertos", 3))
