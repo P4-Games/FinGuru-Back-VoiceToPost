@@ -16,7 +16,7 @@ def get_response(message, prompt):
             ],
             model="gpt-3.5-turbo",
         )
-        new_message = response.choices[0]
+        new_message = response.choices[0].
         if new_message == "":
             return message
         else:
@@ -38,6 +38,6 @@ def iterate_response(message, times):
             new_message = get_response(new_message, prompts[role])
             print(f"{role}: {new_message}")
 
-iterate_response("hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", 3)
-#print(get_response("Hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", prompts["Asistente"]))
+#iterate_response("hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", 3)
+print(get_response("Hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", prompts["Asistente"]))
 #print(prompts["Asistente"])
