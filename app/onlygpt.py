@@ -16,6 +16,18 @@ def chat_gpt(message,rol):
     message = response.choices[0].text.strip()
     return message
 
+def chat(message, rol):
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": rol},
+            {"role": "user", "content": message}
+        ],
+        temperature=0.2,
+    )
+    response = response["choices"][0]["message"]["content"]
+    return response
+
 from prompts import *
 
 def iterate_many_times(message, times):
@@ -23,10 +35,13 @@ def iterate_many_times(message, times):
     agents = [asistente, marketing, editor, director]
     for i in range(times):
         for agent in agents:
-            new_message = chat_gpt(new_message, agent)
-
+            print("------------prompt llegada----------------")
+            print(agents.index(agent))
+            print(new_message)
+            new_message = chat(new_message, agent)
+            print("prompt salida: ------------")
             print(new_message)
     
     return new_message
 
-#print(iterate_many_times("Hubo un choque en callao y santa fe, creo que el conductor estaba ebrio, no hubo muertos", 3))
+print(iterate_many_times("Hubo un choque en callao y santa fe, creo que el conductor estaba ebrio, no hubo muertos, ni heridos", 1))
