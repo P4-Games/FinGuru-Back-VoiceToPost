@@ -1,22 +1,19 @@
-from openai import OpenAI
+import openai
 
-client = OpenAI(
-    # defaults to os.environ.get("OPENAI_API_KEY")
-    api_key="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",
-)
+openai.api_key = "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"
 
 def get_response(message, prompt):
     try:
-        response = client.chat.completions.create(
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Say this is a test",
-                }
-            ],
+        response = openai.completions.create(
             model="gpt-3.5-turbo",
+            prompt=message,
+            max_tokens=1024,
+            n=1,
+            stop=None,
+            temperature=0.2,
+            user=prompt
         )
-        new_message = response.choices[0].
+        new_message = response.choices[0].text.strip()
         if new_message == "":
             return message
         else:
@@ -38,6 +35,6 @@ def iterate_response(message, times):
             new_message = get_response(new_message, prompts[role])
             print(f"{role}: {new_message}")
 
-#iterate_response("hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", 3)
-print(get_response("Hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", prompts["Asistente"]))
+iterate_response("hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", 3)
+#print(get_response("Hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", prompts["Asistente"]))
 #print(prompts["Asistente"])
