@@ -3,10 +3,13 @@ from algosdk.v2client import algod
 import algosdk
 # generate an account
 private_key, address = account.generate_account()
+
+private_key = algosdk.mnemonic.to_private_key("supreme protect marriage little siren brief pull remember plunge outside deposit tomato drink coyote boy romance fee empower scatter green token february clog ability glance")
+address = account.address_from_private_key(private_key)
 print("Private key:", private_key)
 print("Address:", address)
 
-algod_address = "http://localhost:4001"
+algod_address = "https://testnet-api.algonode.cloud"
 algod_token = "a" * 64
 algod_client = algod.AlgodClient(algod_token, algod_address)
 
@@ -56,17 +59,33 @@ def create_token():
 
 def transfer_tokens(address_to_send, amount):
     sp = algod_client.suggested_params()
+
+    xopfer_txn = algosdk.transaction.AssetOptInTxn(
+        sender = address, 
+        index = 477809769,
+        sp=sp
+    )
+
+    signed_xfer_txn = xopfer_txn.sign(private_key)
+    txid = algod_client.send_transaction(signed_xfer_txn)
+    print(f"Sent transfer transaction with txid: {txid}")
+
+    results = algosdk.transaction.wait_for_confirmation(algod_client, txid, 4)
+    
     # Create transfer transaction
     xfer_txn = algosdk.transaction.AssetTransferTxn(
         sender=address,
         sp=sp,
         receiver=address_to_send,
         amt=amount,
-        index=created_asset,
+        index=477809769,
     )
+
     signed_xfer_txn = xfer_txn.sign(private_key)
     txid = algod_client.send_transaction(signed_xfer_txn)
     print(f"Sent transfer transaction with txid: {txid}")
 
     results = algosdk.transaction.wait_for_confirmation(algod_client, txid, 4)
     return (f"Result confirmed in tx: {txid}")
+
+transfer_tokens("XJ6LZLT4MU3H7PYAXL54PBLJ4FSXVJVUQ4IC26MV4CR73MF6W5W7WPV434", 1)
