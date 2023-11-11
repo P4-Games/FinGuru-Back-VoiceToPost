@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 import openai
 import os
+from pathlib import Path
 
 """
 client = openai.OpenAI(
@@ -54,7 +55,7 @@ async def convert_audio(file: UploadFile):
 
    except Exception as e:
        print(e)
-       return Response({"error": "Ocurrió un error al procesar el audio.", "error_detail": e.args}, 400)
+       return {"error": "Ocurrió un error al procesar el audio.", "error_detail": e.args}
 
    finally:
        # Eliminar el archivo de audio
