@@ -40,7 +40,7 @@ async def convert_audio(file: UploadFile):
     Convert WAV file audio to text using Whisper
     """
     try:
-        save_path = os.path.join("app", "uploads", "convert_audio.wav   ")
+        save_path = os.path.join("app", "uploads", "convert_audio.wav")
         with open(save_path, "wb") as uploaded_file:
             uploaded_file.write(file.file.read())
         f = open("app/uploads/convert_audio.wav", "rb")
