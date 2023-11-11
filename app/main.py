@@ -38,7 +38,7 @@ async def convert_audio(file: UploadFile):
     """
     Convert WAV file audio to text using Whisper
     """
-    save_path = os.path.join("app", "uploads", file.filename)
+    save_path = os.path.join("app", file.filename)
     try:
         if (file.content_type != "audio/wav"):
            return Response("Error, el audio tiene q ser wav", 400)
