@@ -2,7 +2,6 @@ from fastapi import FastAPI, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 import openai
 import os
-from pathlib import Path
 
 """
 client = openai.OpenAI(
@@ -36,34 +35,38 @@ async def test():
 
 @app.post("/convert_audio")
 async def convert_audio(file: UploadFile):
-   """
-   Convert WAV file audio to text using Whisper
-   """
-   try:
-       # Guardar el archivo de audio con su nombre original
-       save_path = os.path.join("app", "uploads", file.filename)
-       with open(save_path, "wb") as uploaded_file:
-           uploaded_file.write(file.file.read())
+    """
+    Convert WAV file audio to text using Whisper
+    """
+    save_path = os.path.join("app", "uploads", file.filename)
+    try:
+        if (file.content_type != "audio/wav"):
+           return Response("Error, el audio tiene q ser wav", 400)
+        
+        # Guardar el archivo de audio con su nombre original
+        
+        with open(save_path, "wb") as uploaded_file:
+            uploaded_file.write(file.file.read())
 
-       # Abrir el archivo de audio guardado
-       with open(save_path, "rb") as f:
-           # Transcribir el archivo de audio usando Whisper
-           transcript = openai.Audio.transcribe(
-               model="whisper-1",
-               file=f
-           )
+        # Abrir el archivo de audio guardado
+        with open(save_path, "rb") as f:
+            # Transcribir el archivo de audio usando Whisper
+            transcript = openai.Audio.transcribe(
+                model="whisper-1",
+                file=f
+            )
 
-   except Exception as e:
-       print(e)
-       return {"error": "Ocurrió un error al procesar el audio.", "error_detail": e.args}
+    except Exception as e:
+        print(e)
+        return Response({"error": "Ocurrió un error al procesar el audio.", "error_detail": e.args}, 400)
 
-   finally:
-       # Eliminar el archivo de audio
-       if os.path.exists(save_path):
-           os.remove(save_path)
+    finally:
+        # Eliminar el archivo de audio
+        if os.path.exists(save_path):
+            os.remove(save_path)
 
-   new_message = iterate_many_times(transcript["text"], 1)
-   return new_message
+    new_message = iterate_many_times(transcript["text"], 1)
+    return new_message
 
 app.post("/transfer_tokens")
 async def transfer_tokens(address_to_send:str, tokenAmount:float):
