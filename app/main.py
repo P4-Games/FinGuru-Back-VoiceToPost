@@ -51,21 +51,25 @@ async def convert_audio(file: UploadFile):
         # Abrir el archivo de audio guardado
         with open(save_path, "rb") as f:
             # Transcribir el archivo de audio usando Whisper
-            transcript = openai.Audio.transcribe(
-                model="whisper-1",
-                file=f
-            )
+            try:
+                transcript = openai.Audio.transcribe(
+                    model="whisper-1",
+                    file=f
+                )
+            except Exception as e:
+                return e
 
     except Exception as e:
-        print(e)
-        return Response({"error": "Ocurrió un error al procesar el audio.", "error_detail": e.args}, 400)
+        return e
 
     finally:
         # Eliminar el archivo de audio
         if os.path.exists(save_path):
             os.remove(save_path)
-
-    new_message = iterate_many_times(transcript["text"], 1)
+    try:        
+        new_message = iterate_many_times(transcript["text"], 1)
+    except Exception as e:
+        return e
     return new_message
 
 app.post("/transfer_tokens")
