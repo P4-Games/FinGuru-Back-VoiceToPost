@@ -67,3 +67,11 @@ async def convert_audio(file: UploadFile):
     except Exception as e:
         print(e)
         return {"error": "Ocurrió un error al procesar el audio.", "error_detail": e.args}
+
+app.post("/transfer_tokens")
+async def transfer_tokens(address_to_send:str, tokenAmount:float):
+    from algorand_functions import transfer_tokens
+    try:
+        return transfer_tokens(address_to_send, tokenAmount)
+    except Exception as e:
+        return {"error": e}

@@ -22,6 +22,7 @@ from typing import Dict, Any
 account_info: Dict[str, Any] = algod_client.account_info(address)
 print(f"Account balance: {account_info.get('amount')} microAlgos")
 
+created_asset = 0
 
 def create_token():
     sp = algod_client.suggested_params()
@@ -29,15 +30,15 @@ def create_token():
         sender=address,
         sp=sp,
         default_frozen=False,
-        unit_name="rug",
-        asset_name="Really Useful Gift",
+        unit_name="NewsCoin",
+        asset_name="News Coin",
         manager=address,
         reserve=address,
         freeze=address,
         clawback=address,
-        url="https://path/to/my/asset/details",
-        total=1000,
-        decimals=0,
+        #url="https://path/to/my/asset/details",
+        total=1000000,
+        decimals=18,
     )
 
     # Sign with secret key of creator
@@ -54,4 +55,18 @@ def create_token():
     print(f"Asset ID created: {created_asset}")
 
 def transfer_tokens(address_to_send, amount):
-    pass
+    sp = algod_client.suggested_params()
+    # Create transfer transaction
+    xfer_txn = algosdk.transaction.AssetTransferTxn(
+        sender=address,
+        sp=sp,
+        receiver=address_to_send,
+        amt=amount,
+        index=created_asset,
+    )
+    signed_xfer_txn = xfer_txn.sign(private_key)
+    txid = algod_client.send_transaction(signed_xfer_txn)
+    print(f"Sent transfer transaction with txid: {txid}")
+
+    results = algosdk.transaction.wait_for_confirmation(algod_client, txid, 4)
+    return (f"Result confirmed in tx: {txid}")
