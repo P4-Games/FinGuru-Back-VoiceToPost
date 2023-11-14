@@ -41,7 +41,7 @@ async def convert_audio(file: UploadFile):
     save_path = os.path.join("app", file.filename)
     try:
         listFormats = ["audio/wav","audio/mpeg","audio/mp4"]
-        if (file.content_type != "audio/wav"):
+        if (file.content_type not in listFormats):
            return Response("Error, el audio tiene q ser wav", 400)
         
         # Guardar el archivo de audio con su nombre original
