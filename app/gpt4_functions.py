@@ -35,6 +35,6 @@ def iterate_response(message, times):
             new_message = get_response(new_message, prompts[role])
             print(f"{role}: {new_message}")
 
-iterate_response("hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", 3)
+#iterate_response("hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", 3)
 #print(get_response("Hubo un choque en callao y santa fe, creo que el conductor estaba alcoholizado", prompts["Asistente"]))
 #print(prompts["Asistente"])

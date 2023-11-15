@@ -59,7 +59,7 @@ redactor = autogen.AssistantAgent(
     is_termination_msg=lambda x: True if "TERMINATE" in x.get("content") else False,
 )
 
-from orchestrator import Orchestrator
+#from orchestrator import Orchestrator
 
 def get_message(message, rounds):
     new_message = message
@@ -70,12 +70,12 @@ def get_message(message, rounds):
         director
     ]
     
-    orchestrator = Orchestrator("Orquestador", agents)
+    "orchestrator = Orchestrator("Orquestador", agents)
     
     message = orchestrator.sequential_conversation(message)
 
     print(message)
 
 
-get_message("el dia de ayer, encontre en la esquina de callao y santa fe un choque terrible entre 2 autos, uno de ellos quedo arriba de la vereda y el otro era un taxi, los vecinos me contaron que el taxista se golpeo la cabesa en el momento del choque y lo llevaron al hospital. todabia estaban las franjas de la policia y se desconose si alguno de los involucrados estaba alcoholizado", 12)
+#get_message("el dia de ayer, encontre en la esquina de callao y santa fe un choque terrible entre 2 autos, uno de ellos quedo arriba de la vereda y el otro era un taxi, los vecinos me contaron que el taxista se golpeo la cabesa en el momento del choque y lo llevaron al hospital. todabia estaban las franjas de la policia y se desconose si alguno de los involucrados estaba alcoholizado", 12)
 #asistente.generate_reply(messages="Hola, como estas?")
