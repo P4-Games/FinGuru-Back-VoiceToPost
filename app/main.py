@@ -38,12 +38,12 @@ async def convert_audio(file: UploadFile):
     """
     Convert WAV file audio to text using Whisper
     """
-    print(file.content_type)
+    #print(file.content_type)
     save_path = os.path.join("app", file.filename)
     try:
-        listFormats = ["audio/wav","audio/mpeg","video/mp4", "audio/x-m4a"]
-        if (file.content_type not in listFormats):
-           return Response("Error, el audio no tiene un formato valido", 400)
+        #listFormats = ["audio/wav","audio/mpeg","video/mp4", "audio/x-m4a"]
+        #if (file.content_type not in listFormats):
+        #   return Response("Error, el audio no tiene un formato valido", 400)
         
         # Guardar el archivo de audio con su nombre original
         with open(save_path, "wb") as uploaded_file:
@@ -61,7 +61,7 @@ async def convert_audio(file: UploadFile):
                 return e
 
     except Exception as e:
-        return e
+        return Response(e, 400)
 
     finally:
         # Eliminar el archivo de audio
