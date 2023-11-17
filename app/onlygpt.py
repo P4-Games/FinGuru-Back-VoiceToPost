@@ -24,6 +24,7 @@ def chat(message, rol):
             {"role": "user", "content": message}
         ],
         temperature=0.2,
+        max_tokens=2000,
     )
     response = response["choices"][0]["message"]["content"]
     return response
