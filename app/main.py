@@ -80,3 +80,13 @@ async def transfer_tokens(address_to_send:str, tokenAmount:float):
         return transfer_tokens(address_to_send, tokenAmount)
     except Exception as e:
         return {"error": e}
+    
+
+
+    
+app.post("/views")
+async def views(id, viewsAmount:int):
+    if viewsAmount < 0:
+        return Response("Error, views must be greater than 0", 400)
+    
+    
