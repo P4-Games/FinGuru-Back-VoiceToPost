@@ -81,12 +81,23 @@ async def transfer_tokens(address_to_send:str, tokenAmount:float):
     except Exception as e:
         return {"error": e}
     
-
-
+from db import connect_to_mongo
+db = connect_to_mongo()
+db = db.db
     
 app.post("/views")
-async def views(id, viewsAmount:int):
+async def views(id, viewsAmount:int, address:str):
     if viewsAmount < 0:
         return Response("Error, views must be greater than 0", 400)
     
+    post = db["finguru"].find({"id":id})
+    post = post[0]
+
+    views_to_claim = viewsAmount - post["views"]
+    post["views"] = viewsAmount
+    db["finguru"].update_one({"id":id}, {"$set": post})
+
+    await transfer_tokens(address, views_to_claim)
+    return f"{views_to_claim} Tokens transfers to {address}"
+
     

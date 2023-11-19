@@ -7,7 +7,7 @@ from os import getenv
 load_dotenv()
 
 MONGO_URI = ""
-MONGO_DB_NAME= ""
+MONGO_DB_NAME= "Finguru"
 
 class MongoDB:
     client: MongoClient = None
