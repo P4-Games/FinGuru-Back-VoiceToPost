@@ -6,7 +6,7 @@ from os import getenv
 
 load_dotenv()
 
-MONGO_URI = ""
+MONGO_URI = "mongodb+srv://gonzageraci:fingurudatabase@finguru.y2tmfcm.mongodb.net/?retryWrites=true&w=majority"
 MONGO_DB_NAME= "Finguru"
 
 class MongoDB:
