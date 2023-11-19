@@ -73,7 +73,7 @@ async def convert_audio(file: UploadFile):
         return e
     return new_message
 
-app.post("/transfer_tokens")
+@app.post("/transfer_tokens")
 async def transfer_tokens(address_to_send:str, tokenAmount:float):
     from algorand_functions import transfer_tokens
     try:
@@ -85,7 +85,7 @@ from db import connect_to_mongo
 db = connect_to_mongo()
 db = db.db
     
-app.post("/views")
+@app.post("/views")
 async def views(id, viewsAmount:int, address:str):
     if viewsAmount < 0:
         return Response("Error, views must be greater than 0", 400)
