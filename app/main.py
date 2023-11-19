@@ -91,11 +91,16 @@ async def views(id, viewsAmount:int, address:str):
         return Response("Error, views must be greater than 0", 400)
     
     post = db["finguru"].find({"id":id})
-    post = post[0]
+    if post[0]:
+        post = post[0]
 
-    views_to_claim = viewsAmount - post["views"]
-    post["views"] = viewsAmount
-    db["finguru"].update_one({"id":id}, {"$set": post})
+        views_to_claim = viewsAmount - post["views"]
+        post["views"] = viewsAmount
+        db["finguru"].update_one({"id":id}, {"$set": post})
+
+    else:
+        db["finguru"].insert_one({"id":id, "views":viewsAmount})
+        views_to_claim = viewsAmount
 
     await transfer_tokens(address, views_to_claim)
     return f"{views_to_claim} Tokens transfers to {address}"
