@@ -79,16 +79,21 @@ def transfer_tokens(address_to_send, amount):
         sp=sp,
         receiver=address_to_send,
         amt=amount,
-        index=475348419,
+        index=481109569,
     )
     signed_xfer_txn = xfer_txn.sign(private_key)
     try:
         txid = algod_client.send_transaction(signed_xfer_txn)
+        print(txid)
     except algosdk.error.AlgodHTTPError as e:
+        print(e)
         return Response(content="Error al enviar los tokens", status_code=404)
     print(f"Sent transfer transaction with txid: {txid}")
 
     results = algosdk.transaction.wait_for_confirmation(algod_client, txid, 4)
+    print(results)
     return (f"Result confirmed in tx: {txid}")
 
 #transfer_tokens("XJ6LZLT4MU3H7PYAXL54PBLJ4FSXVJVUQ4IC26MV4CR73MF6W5W7WPV434", 1)
+
+#create_token()
