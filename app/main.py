@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import openai
 import os
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -80,9 +81,17 @@ async def _transfer_tokens(address_to_send:str, tokenAmount:float):
 from db import connect_to_mongo
 db = connect_to_mongo()
 db = db.db
+
+class ParamsToClaimTokens(BaseModel):
+    id: int
+    viewsAmount: int
+    address: str
     
 @app.post("/views")
-async def views(id, viewsAmount:int, address:str):
+async def views(data:ParamsToClaimTokens):
+    id = data.id
+    viewsAmount = data.viewsAmount
+    address = data.address
     if viewsAmount < 0:
         return Response("Error, views must be greater than 0", 400)
     
