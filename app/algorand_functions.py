@@ -2,10 +2,13 @@ from algosdk import account, encoding
 from algosdk.v2client import algod
 import algosdk
 from fastapi import HTTPException, Response
+from dotenv import load_dotenv
+from os import getenv
+load_dotenv()
 # generate an account
 private_key, address = account.generate_account()
 
-private_key = algosdk.mnemonic.to_private_key("supreme protect marriage little siren brief pull remember plunge outside deposit tomato drink coyote boy romance fee empower scatter green token february clog ability glance")
+private_key = algosdk.mnemonic.to_private_key(getenv("passprhase"))
 address = account.address_from_private_key(private_key)
 #print("Private key:", private_key)
 print("Address:", address)
