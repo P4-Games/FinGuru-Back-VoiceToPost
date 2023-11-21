@@ -1,6 +1,10 @@
 import openai
+from os import getenv
+from dotenv import load_dotenv
 
-openai.api_key = "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"
+load_dotenv()
+
+openai.api_key = getenv("OPENAI_API_KEY")
 
 def get_response(message, prompt):
     try:

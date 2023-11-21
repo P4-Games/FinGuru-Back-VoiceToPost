@@ -2,12 +2,10 @@ from fastapi import FastAPI, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 import openai
 import os
+from dotenv import load_dotenv
 
-"""
-client = openai.OpenAI(
-    api_key= "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"
-)
-"""
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 app = FastAPI(
     title= "Fingurú API",
@@ -73,13 +71,11 @@ async def convert_audio(file: UploadFile):
         return e
     return new_message
 
+from algorand_functions import transfer_tokens
+
 @app.post("/transfer_tokens")
-async def transfer_tokens(address_to_send:str, tokenAmount:float):
-    from algorand_functions import transfer_tokens
-    try:
-        return transfer_tokens(address_to_send, tokenAmount)
-    except Exception as e:
-        return {"error": e}
+async def _transfer_tokens(address_to_send:str, tokenAmount:float):
+    return transfer_tokens(address_to_send, tokenAmount)
     
 from db import connect_to_mongo
 db = connect_to_mongo()
@@ -91,18 +87,22 @@ async def views(id, viewsAmount:int, address:str):
         return Response("Error, views must be greater than 0", 400)
     
     post = db["finguru"].find({"id":id})
-    if post[0]:
+    try:
         post = post[0]
 
         views_to_claim = viewsAmount - post["views"]
-        post["views"] = viewsAmount
-        db["finguru"].update_one({"id":id}, {"$set": post})
-
-    else:
+        if views_to_claim > 0:
+            post["views"] = viewsAmount
+            db["finguru"].update_one({"id":id}, {"$set": post})
+        else:
+            return Response("Error", 400)
+    except:
         db["finguru"].insert_one({"id":id, "views":viewsAmount})
         views_to_claim = viewsAmount
 
-    await transfer_tokens(address, views_to_claim)
-    return f"{views_to_claim} Tokens transfers to {address}"
+    if views_to_claim <= 0:
+        return Response("Error, no hay tokens para enviar", status_code=400)
+    return transfer_tokens(address, views_to_claim)
+    #return f"{views_to_claim} Tokens transfers to {address}"
 
     

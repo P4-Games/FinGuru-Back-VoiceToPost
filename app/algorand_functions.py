@@ -1,12 +1,13 @@
 from algosdk import account, encoding
 from algosdk.v2client import algod
 import algosdk
+from fastapi import HTTPException, Response
 # generate an account
 private_key, address = account.generate_account()
 
 private_key = algosdk.mnemonic.to_private_key("supreme protect marriage little siren brief pull remember plunge outside deposit tomato drink coyote boy romance fee empower scatter green token february clog ability glance")
 address = account.address_from_private_key(private_key)
-print("Private key:", private_key)
+#print("Private key:", private_key)
 print("Address:", address)
 
 algod_address = "https://testnet-api.algonode.cloud"
@@ -59,7 +60,7 @@ def create_token():
 
 def transfer_tokens(address_to_send, amount):
     sp = algod_client.suggested_params()
-
+    """
     xopfer_txn = algosdk.transaction.AssetOptInTxn(
         sender = address, 
         index = 477809769,
@@ -71,21 +72,23 @@ def transfer_tokens(address_to_send, amount):
     print(f"Sent transfer transaction with txid: {txid}")
 
     results = algosdk.transaction.wait_for_confirmation(algod_client, txid, 4)
-    
+    """
     # Create transfer transaction
     xfer_txn = algosdk.transaction.AssetTransferTxn(
         sender=address,
         sp=sp,
         receiver=address_to_send,
         amt=amount,
-        index=477809769,
+        index=475348419,
     )
-
     signed_xfer_txn = xfer_txn.sign(private_key)
-    txid = algod_client.send_transaction(signed_xfer_txn)
+    try:
+        txid = algod_client.send_transaction(signed_xfer_txn)
+    except algosdk.error.AlgodHTTPError as e:
+        return Response(content="Error al enviar los tokens", status_code=404)
     print(f"Sent transfer transaction with txid: {txid}")
 
     results = algosdk.transaction.wait_for_confirmation(algod_client, txid, 4)
     return (f"Result confirmed in tx: {txid}")
 
-transfer_tokens("XJ6LZLT4MU3H7PYAXL54PBLJ4FSXVJVUQ4IC26MV4CR73MF6W5W7WPV434", 1)
+#transfer_tokens("XJ6LZLT4MU3H7PYAXL54PBLJ4FSXVJVUQ4IC26MV4CR73MF6W5W7WPV434", 1)
