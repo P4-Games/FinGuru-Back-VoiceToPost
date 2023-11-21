@@ -24,7 +24,7 @@ def connect_to_mongo():
     db.client = MongoClient(host=MONGO_URI,
                             tls=True,
                             tlsAllowInvalidCertificates=True)
-    db.db = db.client["matrix-db"]
+    db.db = db.client["Finguru-posts-db"]
     return db
 
 def close_mongo_connection():
