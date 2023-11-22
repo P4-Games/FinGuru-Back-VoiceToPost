@@ -111,7 +111,7 @@ async def views(data:ParamsToClaimTokens):
 
     if views_to_claim <= 0:
         return Response("Error, no hay tokens para enviar", status_code=400)
-    return transfer_tokens(address, views_to_claim)
+    return transfer_tokens(address, views_to_claim*10**18)
     #return f"{views_to_claim} Tokens transfers to {address}"
 
     
