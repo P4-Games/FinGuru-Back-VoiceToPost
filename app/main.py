@@ -1,9 +1,11 @@
-from fastapi import FastAPI, UploadFile, Response
+from fastapi import FastAPI, UploadFile, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import openai
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
+
+from agents import iterate_agents
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -114,4 +116,49 @@ async def views(data:ParamsToClaimTokens):
     return transfer_tokens(address, views_to_claim*10**18)
     #return f"{views_to_claim} Tokens transfers to {address}"
 
-    
+class TextInput(BaseModel):
+    text: str
+
+@app.post("/convert_text_v2")
+async def convert_text(data: TextInput):
+    try:
+        new_message = iterate_agents(f"Debes escribir un articulo sobre este hecho, nota o tema: {data.text}")
+    except Exception as e:
+        return HTTPException(status_code=400, detail=str(e))
+    return new_message
+
+@app.post("/convert_audio_v2")
+async def convert_audio(file: UploadFile):
+    """
+    Convert WAV file audio to text using Whisper
+    """
+    save_path = os.path.join("app", file.filename)
+    try:
+        # Guardar el archivo de audio con su nombre original
+        with open(save_path, "wb") as uploaded_file:
+            uploaded_file.write(file.file.read())
+
+        # Abrir el archivo de audio guardado
+        with open(save_path, "rb") as f:
+            # Transcribir el archivo de audio usando Whisper
+            try:
+                transcript = openai.Audio.transcribe(
+                    model="whisper-1",
+                    file=f
+                )
+            except Exception as e:
+                return e
+
+    except Exception as e:
+        return Response(e, 400)
+
+    finally:
+        # Eliminar el archivo de audio
+        if os.path.exists(save_path):
+            os.remove(save_path)
+
+    try:
+        new_message = iterate_agents(transcript["text"])
+    except Exception as e:
+        return e
+    return new_message

@@ -2,3 +2,4 @@ app/__pycache__
 venv
 cache.db
 .env
+.env.local
