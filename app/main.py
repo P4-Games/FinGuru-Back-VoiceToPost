@@ -6,9 +6,11 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from agents import iterate_agents
+from agents.agents import iterate_agents
 
-load_dotenv()
+from utils.clean import clean_message
+
+load_dotenv('.env.local')
 openai = OpenAI(
   api_key=os.environ['OPENAI_API_KEY'],
 )
@@ -162,6 +164,6 @@ async def convert_audio(file: UploadFile):
         transcript_text = transcript
         print(transcript_text)
         new_message = iterate_agents(f"Hecho, nota o tema: {transcript_text}")
-        return new_message.replace("TERMINATE", "").replace("```", "").replace("html", "")
+        return clean_message(new_message)
     except Exception as e:
         return Response(str(e), 400)

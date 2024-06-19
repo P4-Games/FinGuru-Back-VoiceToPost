@@ -4,7 +4,7 @@ from fastapi import HTTPException
 from dotenv import load_dotenv
 from os import getenv
 
-load_dotenv()
+load_dotenv('.env.local')
 
 MONGO_URI = getenv("MONGODB_URI")
 MONGO_DB_NAME= "Finguru"
