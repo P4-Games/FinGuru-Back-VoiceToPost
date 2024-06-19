@@ -1,6 +1,7 @@
 from fastapi import FastAPI, UploadFile, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import openai
+from openai import OpenAI
+
 import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
@@ -8,7 +9,9 @@ from pydantic import BaseModel
 from agents import iterate_agents
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai = OpenAI(
+  api_key=os.environ['OPENAI_API_KEY'],
+)
 
 app = FastAPI(
     title= "Fingurú API",
@@ -51,25 +54,24 @@ async def convert_audio(file: UploadFile):
             uploaded_file.write(file.file.read())
 
         # Abrir el archivo de audio guardado
-        with open(save_path, "rb") as f:
-            # Transcribir el archivo de audio usando Whisper
-            try:
-                transcript = openai.Audio.transcribe(
-                    model="whisper-1",
-                    file=f
-                )
-            except Exception as e:
-                return e
+        with open(save_path, "rb") as audio_file:
+            transcript = openai.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file,
+                response_format='text'
+            )
 
     except Exception as e:
-        return Response(e, 400)
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        return Response(str(e), 400)
 
     finally:
         # Eliminar el archivo de audio
         if os.path.exists(save_path):
             os.remove(save_path)
     try:        
-        new_message = iterate_many_times(transcript["text"], 1)
+        new_message = iterate_many_times(transcript, 1)
     except Exception as e:
         return e
     return new_message
@@ -122,7 +124,7 @@ class TextInput(BaseModel):
 @app.post("/convert_text_v2")
 async def convert_text(data: TextInput):
     try:
-        new_message = iterate_agents(f"Debes escribir un articulo sobre este hecho, nota o tema: {data.text}")
+        new_message = iterate_agents(f"Hecho, nota o tema: {data.text}")
     except Exception as e:
         return HTTPException(status_code=400, detail=str(e))
     return new_message
@@ -139,18 +141,17 @@ async def convert_audio(file: UploadFile):
             uploaded_file.write(file.file.read())
 
         # Abrir el archivo de audio guardado
-        with open(save_path, "rb") as f:
-            # Transcribir el archivo de audio usando Whisper
-            try:
-                transcript = openai.Audio.transcribe(
-                    model="whisper-1",
-                    file=f
-                )
-            except Exception as e:
-                return e
+        with open(save_path, "rb") as audio_file:
+            transcript = openai.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file,
+                response_format='text'
+            )
 
     except Exception as e:
-        return Response(e, 400)
+        if os.path.exists(save_path):
+            os.remove(save_path)
+        return Response(str(e), 400)
 
     finally:
         # Eliminar el archivo de audio
@@ -158,7 +159,9 @@ async def convert_audio(file: UploadFile):
             os.remove(save_path)
 
     try:
-        new_message = iterate_agents(transcript["text"])
+        transcript_text = transcript
+        print(transcript_text)
+        new_message = iterate_agents(f"Hecho, nota o tema: {transcript_text}")
+        return new_message.replace("TERMINATE", "").replace("```", "").replace("html", "")
     except Exception as e:
-        return e
-    return new_message
+        return Response(str(e), 400)

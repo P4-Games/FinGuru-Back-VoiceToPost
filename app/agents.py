@@ -64,7 +64,7 @@ def iterate_agents(message):
 
     editor_task = Task(
         description=f"{goals.get('editor')} El artículo debe tratar sobre {message}",
-        expected_output=f"Garantizar la cohesión y coherencia de los artículos con la línea editorial de Fin.Gurú y devolver el artículo optimizado asegurando que lo modificado o redactado sea sobre esto: {message}",
+        expected_output=f"Garantizar la cohesión y coherencia de los artículos con la línea editorial de Fin.Gurú y devolver el artículo optimizado asegurando que lo modificado o redactado sea sobre esto: {message} y debe estar en formato HTML de solo lo que va dentro del body",
         tools=[],
         agent=editor,
         async_execution=False,
@@ -72,7 +72,7 @@ def iterate_agents(message):
 
     writer_task = Task(
         description=f"{goals.get('asistente')} Redacta un borrador de artículo sobre esto: {message}",
-        expected_output=f"Un artículo perfectamente escrito y pulido, listo para ser revisado por el editor, tiene que tratar sobre {message}",
+        expected_output=f"Un artículo perfectamente escrito y pulido, listo para ser revisado por el editor, tiene que tratar sobre {message} y el articulo debe estar en formato HTML de solo lo que va dentro del body",
         tools=[],
         agent=asistente,
         async_execution=False,
@@ -80,7 +80,7 @@ def iterate_agents(message):
 
     director_task = Task(
         description=f"{goals.get('director')} Revisar y evaluar el artículo sobre {message}",
-        expected_output="Determinar si el artículo está listo para ser publicado o si necesita ajustes adicionales, y devolver el articulo ya terminado",
+        expected_output="Determinar si el artículo está listo para ser publicado o si necesita ajustes adicionales, y devolver el articulo ya terminado en formato HTML de solo lo que va dentro del body",
         tools=[],
         agent=director,
         async_execution=False,

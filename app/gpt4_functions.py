@@ -1,10 +1,13 @@
-import openai
+from openai import OpenAI
 from os import getenv
 from dotenv import load_dotenv
 
 load_dotenv()
 
-openai.api_key = getenv("OPENAI_API_KEY")
+openai = OpenAI(
+  api_key=os.environ['OPENAI_API_KEY'],
+)
+
 
 def get_response(message, prompt):
     try:
