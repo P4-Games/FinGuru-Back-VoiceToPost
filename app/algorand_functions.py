@@ -4,7 +4,7 @@ import algosdk
 from fastapi import HTTPException, Response
 from dotenv import load_dotenv
 from os import getenv
-load_dotenv()
+load_dotenv('.env.local')
 # generate an account
 private_key, address = account.generate_account()
 

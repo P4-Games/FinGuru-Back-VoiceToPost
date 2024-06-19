@@ -1,14 +1,16 @@
-import openai
+from openai import OpenAI
 import json
 from os import getenv
 from dotenv import load_dotenv
 
-load_dotenv()
-openai.api_key = getenv("OPENAI_API_KEY")
+load_dotenv('.env.local')
+openai = OpenAI(
+  api_key=getenv("OPENAI_API_KEY")
+)
 
 def chat_gpt(message,rol):
     prompt = f"Tu eres:{rol}. Y este es el articulo con el cual tienes que trabajar: {message}"
-    response = openai.Completion.create(
+    response = openai.chat.completions.create(
         engine="gpt-4-1106-preview",
         prompt=prompt,
         max_tokens=1024,
@@ -21,7 +23,7 @@ def chat_gpt(message,rol):
 
 def chat(message, rol):
     print(getenv("OPENAI_API_KEY"))
-    response = openai.ChatCompletion.create(
+    response = openai.chat.completions.create(
         model="gpt-4-1106-preview",
         messages=[
             {"role": "system", "content": rol},
