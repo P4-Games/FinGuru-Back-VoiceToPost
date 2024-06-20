@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -8,7 +8,7 @@ COPY requirements.txt requirements.txt
 # Copiamos tanto .env como .env.local si existen
 COPY .env* ./
 
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 8080
 
