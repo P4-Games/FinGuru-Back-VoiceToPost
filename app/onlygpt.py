@@ -1,9 +1,9 @@
 from openai import OpenAI
 import json
 from os import getenv
-from dotenv import load_dotenv
+from load_env import load_env_files
 
-load_dotenv('.env.local')
+load_env_files()
 openai = OpenAI(
   api_key=getenv("OPENAI_API_KEY")
 )

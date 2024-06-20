@@ -1,13 +1,12 @@
-from crewai import Agent, Task, Crew, Process
+from crewai import Crew, Process
 import os
-from langchain.chat_models import ChatOpenAI
-from dotenv import load_dotenv
 from agents.asistente import get_asistente_agent,get_asistente_task
 from agents.marketing import get_marketing_agent,get_marketing_task
 from agents.editor import get_editor_agent,get_editor_task
 from agents.director import get_director_agent,get_director_task
+from load_env import load_env_files
 
-load_dotenv('.env.local')
+load_env_files()
 
 openai_api_key = os.getenv("OPENAI_API_KEY")
 

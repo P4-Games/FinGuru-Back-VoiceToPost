@@ -1,10 +1,11 @@
-from algosdk import account, encoding
-from algosdk.v2client import algod
 import algosdk
-from fastapi import HTTPException, Response
-from dotenv import load_dotenv
+from algosdk import account
+from algosdk.v2client import algod
+from fastapi import Response
+from load_env import load_env_files
 from os import getenv
-load_dotenv('.env.local')
+
+load_env_files()
 # generate an account
 private_key, address = account.generate_account()
 

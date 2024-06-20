@@ -1,8 +1,8 @@
+import os
 from openai import OpenAI
-from os import getenv
-from dotenv import load_dotenv
+from load_env import load_env_files
 
-load_dotenv('.env.local')
+load_env_files()
 
 openai = OpenAI(
   api_key=os.environ['OPENAI_API_KEY'],

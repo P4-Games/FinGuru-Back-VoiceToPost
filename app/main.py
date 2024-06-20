@@ -1,16 +1,13 @@
+import os
 from fastapi import FastAPI, UploadFile, Response, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
-
-import os
-from dotenv import load_dotenv
 from pydantic import BaseModel
-
 from agents.agents import iterate_agents
-
 from utils.clean import clean_message
+from load_env import load_env_files
 
-load_dotenv('.env.local')
+load_env_files()
 openai = OpenAI(
   api_key=os.environ['OPENAI_API_KEY'],
 )

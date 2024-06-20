@@ -1,10 +1,10 @@
 from pymongo import MongoClient
 from pymongo.database import Database
 from fastapi import HTTPException
-from dotenv import load_dotenv
+from load_env import load_env_files
 from os import getenv
 
-load_dotenv('.env.local')
+load_env_files()
 
 MONGO_URI = getenv("MONGODB_URI")
 MONGO_DB_NAME= "Finguru"
