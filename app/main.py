@@ -126,7 +126,7 @@ async def convert_text(data: TextInput):
         new_message = iterate_agents(f"Hecho, nota o tema: {data.text}")
     except Exception as e:
         return HTTPException(status_code=400, detail=str(e))
-    return new_message
+    return clean_message(new_message)
 
 @app.post("/convert_audio_v2")
 async def convert_audio(file: UploadFile):
