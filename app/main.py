@@ -1,10 +1,11 @@
 import os
-from fastapi import FastAPI, UploadFile, Response, HTTPException
+from fastapi import FastAPI, UploadFile, Response, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel
 from agents.agents import iterate_agents
 from utils.clean import clean_message
+from utils.auth import validate_token
 from load_env import load_env_files
 
 load_env_files()
@@ -121,7 +122,23 @@ class TextInput(BaseModel):
     text: str
 
 @app.post("/convert_text_v2")
-async def convert_text(data: TextInput):
+async def convert_text(data: TextInput, user: dict = Depends(validate_token)):
+    """
+    Convierte texto de entrada en un nuevo mensaje procesado por múltiples agentes.
+
+    Esta función toma un texto de entrada, lo procesa a través de una serie de agentes
+    y devuelve un mensaje limpio y formateado.
+
+    Args:
+        data (TextInput): Un objeto que contiene el texto a procesar.
+        user (dict): Información del usuario autenticado (inyectada por validate_token).
+
+    Returns:
+        str: El mensaje procesado y limpio.
+
+    Raises:
+        HTTPException: Si ocurre un error durante el procesamiento.
+    """
     try:
         new_message = iterate_agents(f"Hecho, nota o tema: {data.text}")
     except Exception as e:
@@ -129,9 +146,22 @@ async def convert_text(data: TextInput):
     return clean_message(new_message)
 
 @app.post("/convert_audio_v2")
-async def convert_audio(file: UploadFile):
+async def convert_audio(file: UploadFile, user: dict = Depends(validate_token)):
     """
-    Convert WAV file audio to text using Whisper
+    Convierte un archivo de audio en texto y luego lo procesa con múltiples agentes.
+
+    Esta función toma un archivo de audio, lo transcribe usando el modelo Whisper de OpenAI,
+    y luego procesa la transcripción a través de una serie de agentes para generar un nuevo mensaje.
+
+    Args:
+        file (UploadFile): El archivo de audio a procesar.
+        user (dict): Información del usuario autenticado (inyectada por validate_token).
+
+    Returns:
+        str: El mensaje procesado y limpio basado en la transcripción del audio.
+
+    Raises:
+        HTTPException: Si ocurre un error durante el procesamiento del audio o la transcripción.
     """
     save_path = os.path.join("app", file.filename)
     try:
