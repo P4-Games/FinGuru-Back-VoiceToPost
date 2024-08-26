@@ -12,7 +12,7 @@ openai = OpenAI(
 def get_response(message, prompt):
     try:
         response = openai.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             prompt=message,
             max_tokens=1024,
             n=1,

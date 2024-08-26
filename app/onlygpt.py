@@ -11,7 +11,7 @@ openai = OpenAI(
 def chat_gpt(message,rol):
     prompt = f"Tu eres:{rol}. Y este es el articulo con el cual tienes que trabajar: {message}"
     response = openai.chat.completions.create(
-        engine="gpt-4-1106-preview",
+        engine="gpt-4o-mini",
         prompt=prompt,
         max_tokens=1024,
         n=1,
@@ -24,7 +24,7 @@ def chat_gpt(message,rol):
 def chat(message, rol):
     print(getenv("OPENAI_API_KEY"))
     response = openai.chat.completions.create(
-        model="gpt-4-1106-preview",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": rol},
             {"role": "user", "content": message}
