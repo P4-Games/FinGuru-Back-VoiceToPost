@@ -7,6 +7,7 @@ from agents.agents import iterate_agents
 from utils.clean import clean_message
 from utils.auth import validate_token
 from load_env import load_env_files
+from utils.middleware import check_subscription
 
 load_env_files()
 openai = OpenAI(
@@ -122,7 +123,7 @@ class TextInput(BaseModel):
     text: str
 
 @app.post("/convert_text_v2")
-async def convert_text(data: TextInput, user: dict = Depends(validate_token)):
+async def convert_text(data: TextInput, user: dict = Depends(check_subscription)):
     """
     Convierte texto de entrada en un nuevo mensaje procesado por múltiples agentes.
 
@@ -146,7 +147,7 @@ async def convert_text(data: TextInput, user: dict = Depends(validate_token)):
     return clean_message(new_message)
 
 @app.post("/convert_audio_v2")
-async def convert_audio(file: UploadFile, user: dict = Depends(validate_token)):
+async def convert_audio(file: UploadFile, user: dict = Depends(check_subscription)):
     """
     Convierte un archivo de audio en texto y luego lo procesa con múltiples agentes.
 
