@@ -57,7 +57,7 @@ async def convert_audio(file: UploadFile):
         # Abrir el archivo de audio guardado
         with open(save_path, "rb") as audio_file:
             transcript = openai.audio.transcriptions.create(
-                model="whisper-1", 
+                model="gpt-4o-mini-transcribe",
                 file=audio_file,
                 response_format='text'
             )
@@ -173,7 +173,7 @@ async def convert_audio(file: UploadFile, user: dict = Depends(check_subscriptio
         # Abrir el archivo de audio guardado
         with open(save_path, "rb") as audio_file:
             transcript = openai.audio.transcriptions.create(
-                model="whisper-1", 
+                model="gpt-4o-mini-transcribe",
                 file=audio_file,
                 response_format='text'
             )
