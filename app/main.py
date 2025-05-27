@@ -206,7 +206,8 @@ async def get_trending_topics(
     hours: Optional[int] = 24,
     language: Optional[str] = "es-419",
     no_cache: Optional[bool] = False,
-    count: Optional[int] = 20
+    count: Optional[int] = 10,
+    user: dict = Depends(check_subscription)
 ):
     """
     Devuelve los temas de tendencia actuales usando Google Trends a través de SerpAPI.
@@ -217,6 +218,7 @@ async def get_trending_topics(
         language: Código de idioma (es-419 para español de Latinoamérica)
         no_cache: Si se debe deshabilitar el caché
         count: Número de resultados a devolver
+        user: Información del usuario autenticado (inyectada por validate_token)
         
     Returns:
         dict: Objeto JSON con las tendencias encontradas
