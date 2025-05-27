@@ -8,6 +8,8 @@ from utils.clean import clean_message
 from utils.auth import validate_token
 from load_env import load_env_files
 from utils.middleware import check_subscription
+from typing import Optional
+from utils.trends_functions import TrendsAPI
 
 load_env_files()
 openai = OpenAI(
@@ -195,3 +197,34 @@ async def convert_audio(file: UploadFile, user: dict = Depends(check_subscriptio
         return clean_message(new_message)
     except Exception as e:
         return Response(str(e), 400)
+
+trends_api = TrendsAPI()
+
+@app.get("/trends")
+async def get_trending_topics(
+    geo: Optional[str] = "AR", 
+    hours: Optional[int] = 24,
+    language: Optional[str] = "es-419",
+    no_cache: Optional[bool] = False,
+    count: Optional[int] = 20
+):
+    """
+    Devuelve los temas de tendencia actuales usando Google Trends a través de SerpAPI.
+    
+    Args:
+        geo: Código de país de dos letras (ej. AR, US, ES)
+        hours: Número de horas para las tendencias (24 por defecto)
+        language: Código de idioma (es-419 para español de Latinoamérica)
+        no_cache: Si se debe deshabilitar el caché
+        count: Número de resultados a devolver
+        
+    Returns:
+        dict: Objeto JSON con las tendencias encontradas
+    """
+    return trends_api.get_trending_searches_by_category(
+        geo=geo, 
+        hours=hours,
+        language=language,
+        no_cache=no_cache,
+        count=count
+    )
