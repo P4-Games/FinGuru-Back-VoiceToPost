@@ -10,6 +10,7 @@ from load_env import load_env_files
 from utils.middleware import check_subscription
 from typing import Optional
 from utils.trends_functions import TrendsAPI
+from agents.automated_trends_agent import run_trends_agent, run_multi_trends_agents
 
 load_env_files()
 openai = OpenAI(
@@ -124,6 +125,10 @@ async def views(data:ParamsToClaimTokens):
 class TextInput(BaseModel):
     text: str
 
+class MultiAgentRequest(BaseModel):
+    topic_position: Optional[int] = None
+    token: Optional[str] = None
+
 @app.post("/convert_text_v2")
 async def convert_text(data: TextInput, user: dict = Depends(check_subscription)):
     """
@@ -230,3 +235,53 @@ async def get_trending_topics(
         no_cache=no_cache,
         count=count
     )
+
+@app.post("/run_trends_agent")
+async def execute_trends_agent():
+    """
+    Ejecuta el agente automatizado que:
+    1. Obtiene las tendencias actuales
+    2. Busca información adicional del primer tema
+    3. Genera un artículo completo usando ChatGPT
+    4. Publica el artículo automáticamente en fin.guru
+    
+    Args:
+        user: Información del usuario autenticado (inyectada por validate_token)
+        
+    Returns:
+        dict: Resultado del proceso automatizado
+    """
+    try:
+        result = run_trends_agent()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error ejecutando agente: {str(e)}")
+
+@app.get("/run_multi_trends_agents")
+async def execute_multi_trends_agents(
+    topic_position: Optional[int] = None,
+    token: Optional[str] = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NDg4OSwiaWF0IjoxNzQ4Mjg0Njg4LCJleHAiOjE3NTA4NzY2ODh9.ZAY1kRtc0gEd0c1kGLmQh5ymXsb8ENlRDvZlCh_8fog',
+    user: dict = Depends(check_subscription)
+):
+    """
+    Ejecuta múltiples agentes automatizados que obtienen sus configuraciones desde la API.
+
+    Esta función:
+    1. Obtiene los agentes disponibles desde NEXT_PUBLIC_API_URL/agent-ias
+    2. Inicializa cada agente con su configuración única (personality, trending, format_markdown)
+    3. Ejecuta todos los agentes con la misma tendencia pero usando sus configuraciones específicas
+    4. Publica los artículos automáticamente en fin.guru
+    
+    Args:
+        topic_position: Posición específica de tendencia (1-10) o None para auto-selección por ChatGPT
+        token: Token de autenticación personalizado (opcional)
+        user: Información del usuario autenticado (inyectada por validate_token)
+        
+    Returns:
+        dict: Resultado del proceso multi-agente con resumen de éxitos y fallos
+    """
+    try:
+        result = run_multi_trends_agents(topic_position=topic_position, token=token)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error ejecutando multi-agentes: {str(e)}")
