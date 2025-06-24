@@ -16,8 +16,7 @@ httpcore
 jiter==0.10.0
 jsonpatch==1.33
 jsonpointer==3.0.0
-langchain==0.1.16
-langchain-core==0.3.63
+langchain==0.3.25
 langchain-text-splitters==0.3.8
 langsmith==0.3.43
 load-dotenv==0.1.0
