@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from openai import OpenAI
 from utils.trends_functions import TrendsAPI
 from load_env import load_env_files
@@ -11,6 +11,10 @@ import html
 load_env_files()
 
 class AutomatedTrendsAgent:
+    # 🔧 OPTIMIZACIÓN: Cache estático para compartir entre instancias
+    _trends_cache = {}
+    _cache_timeout_minutes = 20
+    
     def __init__(self, agent_config: Optional[Dict[str, Any]] = None):
         self.openai_client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
         self.serpapi_key = os.getenv("SERPAPI_KEY")
@@ -159,14 +163,42 @@ class AutomatedTrendsAgent:
             print(f"❌ Error general inicializando agentes: {str(e)}")
             return []
     
-    def get_trending_topics(self) -> Dict[str, Any]:
-        """Obtiene los temas de tendencia actuales"""
-        return self.trends_api.get_trending_searches_by_category(
+    def get_trending_topics(self, force_refresh: bool = False) -> Dict[str, Any]:
+        """Obtiene los temas de tendencia actuales con sistema de caché optimizado"""
+        
+        # 🔧 OPTIMIZACIÓN: Verificar caché antes de hacer llamada API
+        cache_key = "trending_topics_AR"
+        current_time = datetime.now()
+        
+        if not force_refresh and cache_key in self._trends_cache:
+            cached_data = self._trends_cache[cache_key]
+            cache_time = datetime.fromisoformat(cached_data['cache_timestamp'])
+            
+            # Verificar si el caché es válido (menos de 30 minutos)
+            if current_time - cache_time < timedelta(minutes=self._cache_timeout_minutes):
+                print(f"✅ Usando caché de tendencias (válido por {self._cache_timeout_minutes} min)")
+                print(f"   Caché creado: {cache_time.strftime('%H:%M:%S')}")
+                print(f"   Tiempo actual: {current_time.strftime('%H:%M:%S')}")
+                return cached_data['data']
+        
+        # 🚨 LLAMADA A API: Solo si no hay caché válido
+        print("🔍 Realizando llamada a SerpAPI para obtener tendencias...")
+        trends_data = self.trends_api.get_trending_searches_by_category(
             geo="AR", 
             hours=24,
             language="es-419",
             count=10        
         )
+        
+        # 💾 Guardar en caché
+        if trends_data.get("status") == "success":
+            self._trends_cache[cache_key] = {
+                'data': trends_data,
+                'cache_timestamp': current_time.isoformat()
+            }
+            print(f"💾 Tendencias guardadas en caché hasta: {(current_time + timedelta(minutes=self._cache_timeout_minutes)).strftime('%H:%M:%S')}")
+        
+        return trends_data
     
     def search_google_news(self, query: str) -> Dict[str, Any]:
         """Busca información adicional sobre el tema en Google usando Serper API"""
@@ -798,6 +830,15 @@ REGLAS IMPORTANTES:
         try:
             print(f"[{datetime.now()}] 🚀 Iniciando proceso multi-agente...")
             
+            # 🔧 OPTIMIZACIÓN: Obtener tendencias UNA SOLA VEZ para todos los agentes
+            print("🔍 Obteniendo tendencias una sola vez para todos los agentes...")
+            shared_trends_data = self.get_trending_topics()
+            
+            if shared_trends_data.get("status") != "success" or not shared_trends_data.get("trending_topics"):
+                return {"status": "error", "message": "No se pudieron obtener tendencias compartidas"}
+            
+            print(f"✅ Tendencias obtenidas exitosamente. Total: {len(shared_trends_data.get('trending_topics', []))}")
+            
             # Inicializar todos los agentes
             agents = self.initialize_agents()
             
@@ -817,8 +858,8 @@ REGLAS IMPORTANTES:
                     print(f"   Nombre: {agent.agent_name}")
                     print(f"{'='*50}")
                     
-                    # Ejecutar el proceso completo para este agente
-                    result = agent.run_automated_process(topic_position)
+                    # 🔧 OPTIMIZACIÓN: Pasar las tendencias compartidas al agente
+                    result = agent.run_automated_process_with_shared_trends(shared_trends_data, topic_position)
                     
                     # Agregar información del agente al resultado
                     if result.get("status") == "success":
@@ -872,6 +913,39 @@ REGLAS IMPORTANTES:
                 "results": [],
                 "summary": {"total_agents": 0, "successful": 0, "failed": 0}
             }
+    
+    def clear_trends_cache(cls):
+        """Limpia el caché de tendencias manualmente"""
+        cls._trends_cache.clear()
+        print("🗑️ Caché de tendencias limpiado manualmente")
+    
+    @classmethod
+    def get_cache_status(cls) -> Dict[str, Any]:
+        """Obtiene el estado actual del caché"""
+        cache_key = "trending_topics_AR"
+        current_time = datetime.now()
+        
+        if cache_key not in cls._trends_cache:
+            return {
+                "status": "empty",
+                "message": "No hay datos en caché"
+            }
+        
+        cached_data = cls._trends_cache[cache_key]
+        cache_time = datetime.fromisoformat(cached_data['cache_timestamp'])
+        time_diff = current_time - cache_time
+        remaining_time = timedelta(minutes=cls._cache_timeout_minutes) - time_diff
+        
+        is_valid = time_diff < timedelta(minutes=cls._cache_timeout_minutes)
+        
+        return {
+            "status": "valid" if is_valid else "expired",
+            "cache_created": cache_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "current_time": current_time.strftime('%Y-%m-%d %H:%M:%S'),
+            "time_since_cache": str(time_diff).split('.')[0],
+            "remaining_time": str(remaining_time).split('.')[0] if is_valid else "0:00:00",
+            "trends_count": len(cached_data['data'].get('trending_topics', []))
+        }
     
     def _validate_and_parse_data(self, data: Any, data_type: str = "unknown") -> Dict[str, Any]:
         """Valida y convierte datos a diccionario de forma robusta"""
@@ -965,7 +1039,7 @@ REGLAS IMPORTANTES:
                     if title:
                         trends_text += f"{i}. {title}\n"
             # Prompt corto para selección
-            selection_prompt = f"""Eres un editor de noticias especializado en Argentina. Te proporciono las 5 tendencias actuales más populares en Argentina.
+            selection_prompt = f"""Eres un editor de noticias especializado en Argentina. Te proporciono las 10 tendencias actuales más populares en Argentina.
 
 TENDENCIAS ACTUALES (últimas 24h):
 {trends_text}
@@ -976,7 +1050,7 @@ Considera:
 {self.trending_prompt}
 
 RESPONDE ÚNICAMENTE EN ESTE FORMATO:
-POSICIÓN: [número del 1 al 5]
+POSICIÓN: [número del 1 al 10]
 TÍTULO: [título exacto de la tendencia elegida]
 RAZÓN: [una línea explicando por qué la elegiste]
 
@@ -1034,6 +1108,76 @@ RAZÓN: Tema económico de alto interés para los argentinos"""
             print(f"   ❌ Error en selección de tendencia: {str(e)}")
             return {"status": "error", "message": str(e)}
 
+    def run_automated_process_with_shared_trends(self, shared_trends_data: Dict[str, Any], topic_position: int = None) -> Dict[str, Any]:
+        """Ejecuta el proceso completo automatizado usando tendencias compartidas (OPTIMIZADO)"""
+        try:
+            print(f"[{datetime.now()}] 🔄 Iniciando proceso automatizado con tendencias compartidas...")
+            
+            # 🚀 OPTIMIZACIÓN: Usar las tendencias compartidas en lugar de hacer una nueva llamada
+            print("1. ✅ Usando tendencias compartidas (SIN llamada API adicional)...")
+            trends_data = shared_trends_data
+            
+            # 2. Determinar la tendencia a usar
+            if topic_position is None:
+                # Permitir que ChatGPT elija la tendencia más relevante
+                print("2. Permitiendo que ChatGPT seleccione la tendencia más relevante...")
+                selection_result = self.select_trending_topic(trends_data)
+                
+                if selection_result.get("status") != "success":
+                    return {"status": "error", "message": "No se pudo seleccionar tendencia"}
+                
+                topic_position = selection_result["selected_position"]
+                selected_trend = selection_result["selected_title"]
+                selection_reason = selection_result["selected_reason"]
+                
+                print(f"   🎯 ChatGPT eligió posición #{topic_position}: {selected_trend}")
+                print(f"   💡 Razón: {selection_reason}")
+            else:
+                # Usar la posición especificada manualmente
+                print(f"2. Usando tendencia en posición manual #{topic_position}...")
+                selected_trend = self._extract_trend_title(trends_data, topic_position)
+                if not selected_trend:
+                    return {"status": "error", "message": f"No se pudo extraer título de la tendencia en posición {topic_position}"}
+                print(f"   📍 Tendencia seleccionada: {selected_trend}")
+            
+            # 3. Buscar información adicional sobre la tendencia seleccionada
+            print("3. Buscando información adicional...")
+            search_results = self.search_google_news(selected_trend)
+            
+            # 4. Crear prompt
+            print("4. Creando prompt...")
+            prompt = self.create_prompt(trends_data, search_results, selected_trend, topic_position)
+            
+            # 5. Generar artículo
+            print("5. Generando artículo...")
+            article_content = self.generate_article_content(prompt)
+            
+            if not article_content:
+                return {"status": "error", "message": "No se pudo generar contenido"}
+            
+            # 6. Procesar datos del artículo
+            print("6. Procesando datos del artículo...")
+            article_data = self.process_article_data(article_content)
+            
+            # 7. Publicar artículo
+            print("7. Publicando artículo...")
+            publish_result = self.publish_article(article_data, selected_trend, search_results)
+            
+            print(f"[{datetime.now()}] Proceso completado!")
+            return {
+                "status": "success",
+                "trend_used": selected_trend,
+                "article_title": article_data["title"],
+                "publish_result": publish_result,
+                "timestamp": datetime.now().isoformat(),
+                "optimization_note": "Usado tendencias compartidas - SIN llamada API adicional"
+            }
+            
+        except Exception as e:
+            error_msg = f"Error en proceso automatizado con tendencias compartidas: {str(e)}"
+            print(error_msg)
+            return {"status": "error", "message": error_msg}
+    
 def run_trends_agent(topic_position: int = None):
     """Función independiente para ejecutar el agente
     
@@ -1063,3 +1207,18 @@ def initialize_agents_from_api():
     """Función independiente para inicializar agentes desde la API"""
     agent = AutomatedTrendsAgent()
     return agent.initialize_agents()
+
+# 🔧 OPTIMIZACIÓN: Funciones para gestionar caché
+def clear_trends_cache():
+    """Función independiente para limpiar el caché de tendencias"""
+    AutomatedTrendsAgent.clear_trends_cache()
+    return {"status": "success", "message": "Caché limpiado exitosamente"}
+
+def get_cache_status():
+    """Función independiente para obtener el estado del caché"""
+    return AutomatedTrendsAgent.get_cache_status()
+
+def get_trending_topics_cached():
+    """Función independiente para obtener tendencias con caché"""
+    agent = AutomatedTrendsAgent()
+    return agent.get_trending_topics()

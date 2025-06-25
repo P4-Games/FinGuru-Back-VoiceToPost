@@ -10,7 +10,7 @@ from load_env import load_env_files
 from utils.middleware import check_subscription
 from typing import Optional
 from utils.trends_functions import TrendsAPI
-from agents.automated_trends_agent import run_trends_agent, run_multi_trends_agents
+from agents.automated_trends_agent import run_multi_trends_agents, clear_trends_cache, get_cache_status, get_trending_topics_cached
 
 load_env_files()
 openai = OpenAI(
@@ -215,7 +215,9 @@ async def get_trending_topics(
     user: dict = Depends(check_subscription)
 ):
     """
-    Devuelve los temas de tendencia actuales usando Google Trends a través de SerpAPI.
+    ⚠️ ENDPOINT LEGACY: Obtiene tendencias directamente de SerpAPI (consume cuota).
+    
+    RECOMENDACIÓN: Usa /trends/cached en su lugar para ahorrar llamadas API.
     
     Args:
         geo: Código de país de dos letras (ej. AR, US, ES)
@@ -236,27 +238,6 @@ async def get_trending_topics(
         count=count
     )
 
-@app.post("/run_trends_agent")
-async def execute_trends_agent():
-    """
-    Ejecuta el agente automatizado que:
-    1. Obtiene las tendencias actuales
-    2. Busca información adicional del primer tema
-    3. Genera un artículo completo usando ChatGPT
-    4. Publica el artículo automáticamente en fin.guru
-    
-    Args:
-        user: Información del usuario autenticado (inyectada por validate_token)
-        
-    Returns:
-        dict: Resultado del proceso automatizado
-    """
-    try:
-        result = run_trends_agent()
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error ejecutando agente: {str(e)}")
-
 @app.get("/run_multi_trends_agents")
 async def execute_multi_trends_agents(
     topic_position: Optional[int] = None,
@@ -264,13 +245,16 @@ async def execute_multi_trends_agents(
     user: dict = Depends(check_subscription)
 ):
     """
-    Ejecuta múltiples agentes automatizados que obtienen sus configuraciones desde la API.
+    🚀 ENDPOINT OPTIMIZADO: Ejecuta múltiples agentes con caché inteligente de tendencias.
 
-    Esta función:
+    Esta función optimizada:
     1. Obtiene los agentes disponibles desde NEXT_PUBLIC_API_URL/agent-ias
-    2. Inicializa cada agente con su configuración única (personality, trending, format_markdown)
-    3. Ejecuta todos los agentes con la misma tendencia pero usando sus configuraciones específicas
-    4. Publica los artículos automáticamente en fin.guru
+    2. Obtiene las tendencias UNA SOLA VEZ y las comparte entre todos los agentes
+    3. Inicializa cada agente con su configuración única (personality, trending, format_markdown)
+    4. Ejecuta todos los agentes con las mismas tendencias cached
+    5. Publica los artículos automáticamente en fin.guru
+    
+    ⚡ AHORRO DE API: En lugar de 5+ llamadas a SerpAPI, solo hace 1 llamada cada 30 minutos.
     
     Args:
         topic_position: Posición específica de tendencia (1-10) o None para auto-selección por ChatGPT
@@ -285,3 +269,59 @@ async def execute_multi_trends_agents(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error ejecutando multi-agentes: {str(e)}")
+
+@app.get("/cache/status")
+async def get_cache_status_endpoint(user: dict = Depends(check_subscription)):
+    """
+    Obtiene el estado actual del caché de tendencias.
+    
+    Muestra información útil para optimizar el uso de SerpAPI:
+    - Si hay datos en caché
+    - Cuándo expira el caché actual
+    - Número de tendencias almacenadas
+    
+    Returns:
+        dict: Estado completo del caché incluyendo datos y timestamps
+    """
+    return get_cache_status()
+
+@app.post("/cache/clear")
+async def clear_cache_endpoint(user: dict = Depends(check_subscription)):
+    """
+    Limpia manualmente el caché de tendencias.
+    
+    Útil cuando:
+    - Quieres forzar una nueva consulta a SerpAPI
+    - Has cambiado configuraciones y necesitas datos frescos
+    - Hay problemas con datos cached
+    
+    Returns:
+        dict: Confirmación de que el caché fue limpiado
+    """
+    return clear_trends_cache()
+
+@app.get("/trends/cached")
+async def get_cached_trends(
+    geo: Optional[str] = "AR", 
+    hours: Optional[int] = 24,
+    language: Optional[str] = "es-419",
+    count: Optional[int] = 10,
+    user: dict = Depends(check_subscription)
+):
+    """
+    🚀 ENDPOINT OPTIMIZADO: Obtiene tendencias usando caché inteligente.
+    
+    Este endpoint utiliza un sistema de caché de 30 minutos para minimizar las llamadas a SerpAPI.
+    Perfecto para conservar tus 100 llamadas mensuales.
+    
+    Args:
+        geo: Código de país de dos letras (ej. AR, US, ES)
+        hours: Número de horas para las tendencias (24 por defecto)
+        language: Código de idioma (es-419 para español de Latinoamérica)
+        count: Número de resultados a devolver
+        user: Información del usuario autenticado
+        
+    Returns:
+        dict: Tendencias con información de caché (cached: true/false)
+    """
+    return get_trending_topics_cached()
