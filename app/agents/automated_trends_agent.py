@@ -17,7 +17,7 @@ class AutomatedTrendsAgent:
     
     def __init__(self, agent_config: Optional[Dict[str, Any]] = None):
         self.openai_client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-        self.serpapi_key = os.getenv("SERPAPI_KEY")
+        self.serpapi_key = os.getenv("SERPAPI_KEY") or "e557100811eafa991ee56fcf4e988e8f6c438fdb8e22ca964babaabffcb733fb"
         self.serper_api_key = "59e9db682aa8fd5c126e4fa6def959279d7167d4"
         self.trends_api = TrendsAPI()
         self.api_endpoint = "https://fin.guru/api/agent-publish-article"
