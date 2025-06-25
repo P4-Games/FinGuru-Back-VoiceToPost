@@ -39,7 +39,6 @@ typing_extensions==4.13.2
 urllib3==2.4.0
 uvicorn==0.34.2
 zstandard==0.23.0
-crewai-tools
 aiohttp==3.9.1
 aiosignal==1.3.1
 diskcache==5.6.3
@@ -58,6 +57,10 @@ pycryptodomex==3.19.0
 pymongo==4.6.1
 PyNaCl==1.5.0
 python-dotenv==1.0.0
-python-multipart==0.0.6
+python-multipart
 termcolor==2.4.0
+typer
+fastapi
+crewai
+crewai-tools==0.2.6
 yarl==1.9.4
