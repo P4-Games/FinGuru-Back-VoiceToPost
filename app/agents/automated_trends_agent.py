@@ -17,14 +17,14 @@ class AutomatedTrendsAgent:
     
     def __init__(self, agent_config: Optional[Dict[str, Any]] = None):
         self.openai_client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-        self.serpapi_key = os.getenv("SERPAPI_KEY") or "e557100811eafa991ee56fcf4e988e8f6c438fdb8e22ca964babaabffcb733fb"
+        self.serpapi_key = os.getenv("SERPAPI_KEY") 
         self.serper_api_key = "59e9db682aa8fd5c126e4fa6def959279d7167d4"
         self.trends_api = TrendsAPI()
         self.api_endpoint = "https://fin.guru/api/agent-publish-article"
         
         # Configuración de API para obtener agentes
-        self.next_public_api_url = os.getenv("NEXT_PUBLIC_API_URL") or "https://finguru-backend-audrfpgrzq-uc.a.run.app/api"
-        self.sudo_api_key = os.getenv("SUDO_API_KEY") or "e5342cf0fa74878e91174e4c82a063dede8521c189d99f95449fc447d5f1c7e87d4373c3bd360daea8bb30443490fe9bf3f1db47944f1fc1f18293bc6693ce2e91ab27fc491c8368d12b19272f0b634218f244477e0508de5baab656c6fd568e7c251670d88df153f2c579d812de5c252c53dab3803821a84e798f0080cd8dfe"
+        self.next_public_api_url = os.getenv("NEXT_PUBLIC_API_URL")
+        self.sudo_api_key = os.getenv("SUDO_API_KEY")
         
         # Configuración específica del agente si se proporciona
         self.agent_config = agent_config or {}
