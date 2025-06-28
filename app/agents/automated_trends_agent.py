@@ -17,7 +17,6 @@ class AutomatedTrendsAgent:
     
     def __init__(self, agent_config: Optional[Dict[str, Any]] = None):
         self.openai_client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
-        self.serpapi_key = os.getenv("SERPAPI_KEY") 
         self.serper_api_key = "59e9db682aa8fd5c126e4fa6def959279d7167d4"
         self.trends_api = TrendsAPI()
         self.api_endpoint = "https://fin.guru/api/agent-publish-article"
@@ -61,7 +60,8 @@ class AutomatedTrendsAgent:
             else:
                 # Si viene en formato Strapi, convertir
                 agents = data.get('data', [])
-                if isinstance(agents, list) and agents:                    # Convertir formato Strapi a formato esperado
+                if isinstance(agents, list) and agents:                    
+                    # Convertir formato Strapi a formato esperado
                     processed_agents = []
                     for agent in agents:
                         if isinstance(agent, dict):
