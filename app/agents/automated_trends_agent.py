@@ -1187,12 +1187,11 @@ def run_trends_agent(topic_position: int = None):
     agent = AutomatedTrendsAgent()
     return agent.run_automated_process(topic_position)
 
-def run_multi_trends_agents(topic_position: int = None, token: str = None):
+def run_multi_trends_agents(topic_position: int = None):
     """Función independiente para ejecutar múltiples agentes desde la API
     
     Args:
         topic_position: Posición específica (1-10) o None para selección automática por ChatGPT
-        token: Token de autenticación (opcional, para compatibilidad con la API)
     """
     # Crear una instancia base para coordinar el proceso
     coordinator = AutomatedTrendsAgent()

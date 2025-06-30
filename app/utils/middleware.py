@@ -1,4 +1,5 @@
 import httpx
+import os
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -38,3 +39,42 @@ async def check_subscription(credentials: HTTPAuthorizationCredentials = Depends
             raise he
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
+
+import httpx
+import os
+from fastapi import HTTPException, Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+security = HTTPBearer()
+
+async def check_sudo_api_key(request: Request):
+    """
+    Verifica que el header X-SUDO-API-KEY contenga el SUDO_API_KEY válido.
+    Completamente independiente del sistema de autenticación de usuarios.
+    """
+    sudo_api_key_from_env = os.getenv("SUDO_API_KEY")
+    
+    if not sudo_api_key_from_env:
+        raise HTTPException(status_code=500, detail="SUDO_API_KEY no configurada en el servidor")
+    
+    # Buscar en diferentes headers posibles
+    sudo_api_key_from_header = (
+        request.headers.get("X-SUDO-API-KEY") or 
+        request.headers.get("x-sudo-api-key") or
+        request.headers.get("SUDO-API-KEY") or
+        request.headers.get("sudo-api-key")
+    )
+    
+    if not sudo_api_key_from_header:
+        raise HTTPException(
+            status_code=401, 
+            detail="Se requiere el header X-SUDO-API-KEY"
+        )
+    
+    if sudo_api_key_from_header != sudo_api_key_from_env:
+        raise HTTPException(
+            status_code=401, 
+            detail="SUDO_API_KEY inválida"
+        )
+    
+    return {"authenticated": True, "sudo_access": True}
