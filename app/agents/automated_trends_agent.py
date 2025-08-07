@@ -20,6 +20,10 @@ class AutomatedTrendsAgent:
     _trends_cache = {}
     _cache_timeout_minutes = 20
     
+    # Cache estático para rastrear tendencias seleccionadas en la sesión multi-agente actual
+    _selected_trends_session = set()
+    _selected_positions_session = set()
+    
     def __init__(self, agent_config: Optional[Dict[str, Any]] = None):
         self.openai_client = OpenAI(api_key=os.environ['OPENAI_API_KEY'])
         self.serper_api_key = "59e9db682aa8fd5c126e4fa6def959279d7167d4"
@@ -811,6 +815,11 @@ REGLAS IMPORTANTES:
         try:
             print(f"[{datetime.now()}] Iniciando proceso multi-agente...")
             
+            # Limpiar cache de sesión para evitar duplicados entre ejecuciones
+            self._selected_trends_session.clear()
+            self._selected_positions_session.clear()
+            print("🔄 Cache de sesión limpiado - tendencias frescas para todos los agentes")
+            
             print("Obteniendo tendencias una sola vez para todos los agentes...")
             shared_trends_data = self.get_trending_topics()
             
@@ -834,6 +843,9 @@ REGLAS IMPORTANTES:
                     print(f"Ejecutando Agente {i+1}/{len(agents)}")
                     print(f"   ID: {agent.agent_id}")
                     print(f"   Nombre: {agent.agent_name}")
+                    print(f"   Tendencias ya usadas: {len(self._selected_trends_session)}")
+                    if self._selected_trends_session:
+                        print(f"   Posiciones usadas: {sorted(list(self._selected_positions_session))}")
                     print(f"{'='*50}")
                     
                     result = agent.run_automated_process_with_shared_trends(shared_trends_data, topic_position)
@@ -868,6 +880,9 @@ REGLAS IMPORTANTES:
             print(f"   Exitosos: {len(successful_agents)}")
             print(f"   Fallidos: {len(failed_agents)}")
             print(f"   Total procesados: {len(all_results)}")
+            print(f"   Total tendencias únicas usadas: {len(self._selected_trends_session)}")
+            if self._selected_trends_session:
+                print(f"   Tendencias seleccionadas: {list(self._selected_trends_session)}")
             
             return {
                 "status": "success",
@@ -876,7 +891,9 @@ REGLAS IMPORTANTES:
                 "summary": {
                     "total_agents": len(all_results),
                     "successful": len(successful_agents),
-                    "failed": len(failed_agents)
+                    "failed": len(failed_agents),
+                    "unique_trends_used": len(self._selected_trends_session),
+                    "trends_selected": list(self._selected_trends_session)
                 }
             }
             
@@ -889,10 +906,18 @@ REGLAS IMPORTANTES:
                 "summary": {"total_agents": 0, "successful": 0, "failed": 0}
             }
     
+    @classmethod
     def clear_trends_cache(cls):
         """Limpia el caché de tendencias manualmente"""
         cls._trends_cache.clear()
         print("Caché de tendencias limpiado manualmente")
+    
+    @classmethod
+    def clear_session_cache(cls):
+        """Limpia el caché de sesión de tendencias seleccionadas manualmente"""
+        cls._selected_trends_session.clear()
+        cls._selected_positions_session.clear()
+        print("🔄 Caché de sesión limpiado - tendencias ya seleccionadas reiniciadas")
     
     @classmethod
     def get_cache_status(cls) -> Dict[str, Any]:
@@ -1009,6 +1034,14 @@ REGLAS IMPORTANTES:
             else:
                 recent_articles_text = "\n(No se encontraron artículos recientes o es el primer artículo del agente)\n"
             
+            # Agregar información sobre tendencias ya seleccionadas en esta sesión multi-agente
+            already_selected_text = ""
+            if self._selected_trends_session:
+                already_selected_text = "\nTENDENCIAS YA SELECCIONADAS EN ESTA SESIÓN (NO ELEGIR ESTAS):\n"
+                for i, (pos, trend) in enumerate(zip(self._selected_positions_session, self._selected_trends_session), 1):
+                    already_selected_text += f"  ❌ Posición {pos}: {trend}\n"
+                already_selected_text += "\nEVITA ESTAS TENDENCIAS COMPLETAMENTE - Ya fueron elegidas por otros agentes en esta misma ejecución.\n"
+            
             trends_text = ""
             trending_topics = trends_data.get("trending_topics", [])
             if isinstance(trending_topics, list) and trending_topics:
@@ -1023,22 +1056,29 @@ REGLAS IMPORTANTES:
                         title = topic
                     
                     if title:
-                        trends_text += f"{i}. {title}\n"
+                        # Marcar tendencias ya seleccionadas
+                        if i in self._selected_positions_session or title in self._selected_trends_session:
+                            trends_text += f"{i}. ❌ {title} - [YA SELECCIONADA - NO USAR]\n"
+                        else:
+                            trends_text += f"{i}. {title}\n"
             
             selection_prompt = f"""Eres un editor de noticias especializado en Argentina. Te proporciono las 10 tendencias actuales más populares en Argentina.
 
 TENDENCIAS ACTUALES (últimas 24h):
 {trends_text}
 {recent_articles_text}
+{already_selected_text}
 Tu tarea es ELEGIR UNA SOLA tendencia que sea más relevante e interesante para el público argentino.
 
 Considera:
 {self.trending_prompt}
 
 REGLAS IMPORTANTES:
-- NO elijas tendencias que se relacionen temáticamente con los artículos recientes mostrados arriba
-- Busca diversidad temática para ofrecer contenido variado
-- Prioriza temas de actualidad que no hayan sido cubiertos recientemente
+- ❌ NO elijas tendencias marcadas con "❌ [YA SELECCIONADA - NO USAR]" - Están PROHIBIDAS
+- ❌ NO elijas tendencias que se relacionen temáticamente con los artículos recientes mostrados arriba
+- ✅ Busca diversidad temática para ofrecer contenido variado
+- ✅ Prioriza temas de actualidad que no hayan sido cubiertos recientemente
+- ✅ SOLO elige entre las tendencias SIN la marca ❌
 
 RESPONDE ÚNICAMENTE EN ESTE FORMATO:
 POSICIÓN: [número del 1 al 10]
@@ -1053,7 +1093,7 @@ RAZÓN: Tema económico de alto interés, diferente a los temas ya cubiertos rec
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "Eres un editor experto en seleccionar noticias relevantes para Argentina. Evita repetir temas ya cubiertos. Responde exactamente en el formato solicitado."},
+                    {"role": "system", "content": "Eres un editor experto en seleccionar noticias relevantes para Argentina. Evita repetir temas ya cubiertos y NUNCA elijas tendencias marcadas como YA SELECCIONADAS. Responde exactamente en el formato solicitado."},
                     {"role": "user", "content": selection_prompt}
                 ],
                 max_tokens=150,  # Aumentar tokens para la razón más detallada
@@ -1080,9 +1120,37 @@ RAZÓN: Tema económico de alto interés, diferente a los temas ya cubiertos rec
                 elif line.startswith('RAZÓN:'):
                     selected_reason = line.replace('RAZÓN:', '').strip()
             
+            # Verificar que no se haya seleccionado una tendencia ya usada
+            if selected_position in self._selected_positions_session or selected_title in self._selected_trends_session:
+                print(f"   ⚠️  ADVERTENCIA: ChatGPT eligió una tendencia ya seleccionada. Buscando alternativa...")
+                
+                # Buscar una tendencia no usada
+                trending_topics = trends_data.get("trending_topics", [])
+                for i, topic in enumerate(trending_topics, 1):
+                    if i not in self._selected_positions_session:
+                        title = ""
+                        if isinstance(topic, dict):
+                            title = topic.get('title', '')
+                            if isinstance(title, dict):
+                                title = title.get('query', str(title))
+                        elif isinstance(topic, str):
+                            title = topic
+                        
+                        if title and title not in self._selected_trends_session:
+                            selected_position = i
+                            selected_title = title
+                            selected_reason = "Selección automática para evitar duplicados"
+                            print(f"   ✅ Fallback a posición #{selected_position}: {selected_title}")
+                            break
+            
             if selected_position and selected_title:
+                # Registrar la selección para evitar duplicados futuros
+                self._selected_positions_session.add(selected_position)
+                self._selected_trends_session.add(selected_title)
+                
                 print(f"   ChatGPT eligió: Posición #{selected_position} - {selected_title}")
                 print(f"   Razón: {selected_reason}")
+                print(f"   📝 Registrado para evitar duplicados futuros")
                 
                 return {
                     "status": "success",
@@ -1193,6 +1261,11 @@ def clear_trends_cache():
     """Función independiente para limpiar el caché de tendencias"""
     AutomatedTrendsAgent.clear_trends_cache()
     return {"status": "success", "message": "Caché limpiado exitosamente"}
+
+def clear_session_cache():
+    """Función independiente para limpiar caché de sesión (tendencias ya seleccionadas)"""
+    AutomatedTrendsAgent.clear_session_cache()
+    return {"status": "success", "message": "Caché de sesión limpiado exitosamente"}
 
 def get_cache_status():
     """Función independiente para obtener el estado del caché"""
