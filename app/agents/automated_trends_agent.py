@@ -42,12 +42,42 @@ class AutomatedTrendsAgent:
         self.trending_prompt = self.agent_config.get('trending', 'Considera: - Relevancia para Argentina - Potencial de generar interés - Actualidad e importancia - Impacto social, económico o cultural')
         self.format_markdown = self.agent_config.get('format_markdown', '')
         
+    def _is_topic_similar_to_recent_articles(self, topic_title: str, recent_articles: List[Dict]) -> bool:
+        """Verifica si un tópico es similar a los artículos recientes usando palabras clave"""
+        if not recent_articles or not topic_title:
+            return False
+        
+        # Palabras clave del tópico actual
+        topic_keywords = set(topic_title.lower().split())
+        
+        for article in recent_articles:
+            article_title = article.get('title', '').lower()
+            article_excerpt = article.get('excerpt', '').lower()
+            
+            # Palabras clave del artículo
+            article_keywords = set()
+            article_keywords.update(article_title.split())
+            article_keywords.update(article_excerpt.split())
+            
+            # Calcular similitud (intersección de palabras clave)
+            common_keywords = topic_keywords.intersection(article_keywords)
+            
+            # Si hay más de 2 palabras en común o coincidencia alta, se considera similar
+            if len(common_keywords) >= 2:
+                similarity_ratio = len(common_keywords) / max(len(topic_keywords), 1)
+                if similarity_ratio > 0.4:  # 40% de similitud o más
+                    print(f"   ⚠️ Tópico '{topic_title}' similar a artículo '{article.get('title')}' (similitud: {similarity_ratio:.2f})")
+                    print(f"   🔑 Palabras en común: {list(common_keywords)}")
+                    return True
+        
+        return False
+
     def get_agent_recent_articles(self, user_id: int) -> Dict[str, Any]:
         """Obtiene los últimos 2 artículos del agente para evitar repetir temas"""
         try:
             print(f"Obteniendo últimos artículos del agente (User ID: {user_id})...")
             
-            endpoint = f"https://backend.fin.guru/api/articles?filters[author][id][$eq]={user_id}&sort=createdAt:desc&pagination[limit]=2&fields[0]=title&fields[1]=excerpt"
+            endpoint = f"https://backend.fin.guru/api/articles?filters[author][id][$eq]={user_id}&sort=createdAt:desc&pagination[limit]=2&fields[0]=title&fields[1]=excerpt&populate=category"
             
             headers = {
                 "Content-Type": "application/json",
@@ -66,16 +96,25 @@ class AutomatedTrendsAgent:
                 for article in data['data']:
                     if isinstance(article, dict) and 'attributes' in article:
                         attr = article['attributes']
+                        
+                        # Extraer categoría si está poblada
+                        category_name = ""
+                        category_data = attr.get('category', {})
+                        if isinstance(category_data, dict) and 'data' in category_data:
+                            category_attrs = category_data.get('data', {}).get('attributes', {})
+                            category_name = category_attrs.get('name', '')
+                        
                         articles.append({
                             'id': article.get('id'),
                             'title': attr.get('title', ''),
                             'excerpt': attr.get('excerpt', ''),
+                            'category': category_name,
                             'createdAt': attr.get('createdAt', '')
                         })
             
             print(f"Se encontraron {len(articles)} artículos recientes")
             for i, article in enumerate(articles):
-                print(f"   {i+1}. {article.get('title', 'Sin título')} (ID: {article.get('id')})")
+                print(f"   {i+1}. {article.get('title', 'Sin título')} (ID: {article.get('id')}) - Categoría: {article.get('category', 'N/A')}")
             
             return {
                 "status": "success",
@@ -1027,12 +1066,20 @@ REGLAS IMPORTANTES:
                 for i, article in enumerate(recent_articles["articles"], 1):
                     title = article.get('title', 'Sin título')
                     excerpt = article.get('excerpt', 'Sin descripción')
-                    if len(excerpt) > 100:
-                        excerpt = excerpt[:97] + "..."
-                    recent_articles_text += f"{i}. {title}\n   {excerpt}\n"
-                recent_articles_text += "\nEVITA ELEGIR TENDENCIAS que se relacionen con estos temas ya cubiertos.\n"
+                    category = article.get('category', 'Sin categoría')
+                    
+                    if len(excerpt) > 150:
+                        excerpt = excerpt[:147] + "..."
+                    
+                    recent_articles_text += f"{i}. 📰 {title}\n"
+                    recent_articles_text += f"   📝 {excerpt}\n"
+                    recent_articles_text += f"   🏷️ Categoría: {category}\n"
+                    recent_articles_text += "\n"
+                
+                recent_articles_text += "🚫 IMPORTANTE: EVITA ELEGIR TENDENCIAS que se relacionen temáticamente con estos artículos recientes.\n"
+                recent_articles_text += "✅ Busca temas DIFERENTES para ofrecer variedad al lector.\n"
             else:
-                recent_articles_text = "\n(No se encontraron artículos recientes o es el primer artículo del agente)\n"
+                recent_articles_text = "\n✨ (No se encontraron artículos recientes - es el primer artículo del agente o agente nuevo)\n"
             
             # Agregar información sobre tendencias ya seleccionadas en esta sesión multi-agente
             already_selected_text = ""
@@ -1068,27 +1115,32 @@ TENDENCIAS ACTUALES (últimas 24h):
 {trends_text}
 {recent_articles_text}
 {already_selected_text}
-Tu tarea es ELEGIR UNA SOLA tendencia que sea más relevante e interesante para el público argentino.
 
-Considera:
+🎯 OBJETIVO: ELEGIR UNA SOLA tendencia que sea MÁS RELEVANTE e INTERESANTE para el público argentino.
+
+📋 CRITERIOS DE SELECCIÓN:
 {self.trending_prompt}
 
-REGLAS IMPORTANTES:
-- ❌ NO elijas tendencias marcadas con "❌ [YA SELECCIONADA - NO USAR]" - Están PROHIBIDAS
-- ❌ NO elijas tendencias que se relacionen temáticamente con los artículos recientes mostrados arriba
-- ✅ Busca diversidad temática para ofrecer contenido variado
-- ✅ Prioriza temas de actualidad que no hayan sido cubiertos recientemente
-- ✅ SOLO elige entre las tendencias SIN la marca ❌
+🚫 REGLAS ESTRICTAS - NO VIOLAR:
+- ❌ PROHIBIDO: NO elijas tendencias marcadas con "❌ [YA SELECCIONADA - NO USAR]"
+- ❌ PROHIBIDO: NO elijas tendencias que tengan relación temática con los artículos recientes mostrados
+- ✅ OBLIGATORIO: SOLO elige entre las tendencias SIN la marca ❌
 
-RESPONDE ÚNICAMENTE EN ESTE FORMATO:
+🔍 ANÁLISIS REQUERIDO:
+1. Revisa cada tendencia disponible (sin ❌)
+2. Compara con los artículos recientes para evitar similitudes
+3. Elige la tendencia más relevante
+4. Justifica por qué es diferente a lo ya publicado
+
+FORMATO DE RESPUESTA OBLIGATORIO:
 POSICIÓN: [número del 1 al 10]
 TÍTULO: [título exacto de la tendencia elegida]
-RAZÓN: [una línea explicando por qué la elegiste y por qué es diferente a los artículos recientes]
+RAZÓN: [explicación detallada de por qué la elegiste y cómo es DIFERENTE a los artículos recientes]
 
 Ejemplo:
 POSICIÓN: 3
 TÍTULO: dólar blue argentina
-RAZÓN: Tema económico de alto interés, diferente a los temas ya cubiertos recientemente"""
+RAZÓN: Tema económico de alto interés público, completamente diferente a los artículos previos"""
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -1137,11 +1189,37 @@ RAZÓN: Tema económico de alto interés, diferente a los temas ya cubiertos rec
                             title = topic
                         
                         if title and title not in self._selected_trends_session:
-                            selected_position = i
-                            selected_title = title
-                            selected_reason = "Selección automática para evitar duplicados"
-                            print(f"   ✅ Fallback a posición #{selected_position}: {selected_title}")
-                            break
+                            # Verificar también que no sea similar a artículos recientes
+                            recent_articles_list = recent_articles.get("articles", [])
+                            if not self._is_topic_similar_to_recent_articles(title, recent_articles_list):
+                                selected_position = i
+                                selected_title = title
+                                selected_reason = "Selección automática para evitar duplicados"
+                                print(f"   ✅ Alternativa encontrada: Posición #{i} - {title}")
+                                break
+                else:
+                    return {"status": "error", "message": "No hay tendencias disponibles que no se relacionen con artículos recientes"}
+            
+            # Validación adicional: verificar similitud con artículos recientes
+            if selected_title and recent_articles.get("articles"):
+                recent_articles_list = recent_articles.get("articles", [])
+                if self._is_topic_similar_to_recent_articles(selected_title, recent_articles_list):
+                    print(f"   ⚠️  ADVERTENCIA: La tendencia '{selected_title}' es muy similar a artículos recientes")
+                    
+                    # Buscar una alternativa no similar
+                    trending_topics = trends_data.get("trending_topics", [])
+                    for i, topic in enumerate(trending_topics, 1):
+                        if i not in self._selected_positions_session:
+                            title = self._extract_trend_title(trends_data, i)
+                            if title and title not in self._selected_trends_session:
+                                if not self._is_topic_similar_to_recent_articles(title, recent_articles_list):
+                                    selected_position = i
+                                    selected_title = title
+                                    selected_reason = "Selección automática para evitar repetición temática"
+                                    print(f"   ✅ Alternativa sin similitud encontrada: Posición #{i} - {title}")
+                                    break
+                    else:
+                        print(f"   ⚠️  No se encontró alternativa, procediendo con la selección original (puede haber similitud)")
             
             if selected_position and selected_title:
                 # Registrar la selección para evitar duplicados futuros
