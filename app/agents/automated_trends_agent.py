@@ -62,10 +62,9 @@ class AutomatedTrendsAgent:
             # Calcular similitud (intersección de palabras clave)
             common_keywords = topic_keywords.intersection(article_keywords)
             
-            # Si hay más de 2 palabras en común o coincidencia alta, se considera similar
             if len(common_keywords) >= 2:
                 similarity_ratio = len(common_keywords) / max(len(topic_keywords), 1)
-                if similarity_ratio > 0.4:  # 40% de similitud o más
+                if similarity_ratio > 0.4:
                     print(f"   ⚠️ Tópico '{topic_title}' similar a artículo '{article.get('title')}' (similitud: {similarity_ratio:.2f})")
                     print(f"   🔑 Palabras en común: {list(common_keywords)}")
                     return True
@@ -97,7 +96,6 @@ class AutomatedTrendsAgent:
                     if isinstance(article, dict) and 'attributes' in article:
                         attr = article['attributes']
                         
-                        # Extraer categoría si está poblada
                         category_name = ""
                         category_data = attr.get('category', {})
                         if isinstance(category_data, dict) and 'data' in category_data:
@@ -124,6 +122,89 @@ class AutomatedTrendsAgent:
             
         except Exception as e:
             print(f"Error obteniendo artículos del agente: {str(e)}")
+            return {
+                "status": "error",
+                "message": str(e),
+                "articles": []
+            }
+
+    def get_all_agents_recent_articles(self, limit_per_agent: int = 2) -> Dict[str, Any]:
+        """Obtiene los artículos recientes de TODOS los agentes para evitar repetir temas"""
+        try:
+            print(f"Obteniendo últimos {limit_per_agent} artículos de TODOS los agentes...")
+            
+            # Primero obtener todos los agentes
+            agents_response = self.get_available_agents()
+            if agents_response.get('status') != 'success':
+                print(f"Error obteniendo agentes: {agents_response.get('message')}")
+                return {"status": "error", "message": "No se pudieron obtener agentes", "articles": []}
+            
+            all_agents = agents_response.get('details', [])
+            all_articles = []
+            agents_processed = 0
+            
+            for agent in all_agents:
+                try:
+                    agent_id = agent.get('id')
+                    agent_name = agent.get('name', f'Agent-{agent_id}')
+                    user_id = agent.get('userId')
+                    
+                    if not user_id:
+                        print(f"   Agente {agent_name} (ID: {agent_id}) sin userId, saltando...")
+                        continue
+                    
+                    print(f"   Obteniendo artículos del agente: {agent_name} (UserID: {user_id})")
+                    
+                    # Obtener artículos de este agente específico
+                    agent_articles = self.get_agent_recent_articles(user_id)
+                    
+                    if agent_articles.get("status") == "success" and agent_articles.get("articles"):
+                        articles = agent_articles.get("articles", [])
+                        
+                        # Agregar información del agente a cada artículo
+                        for article in articles:
+                            article['agent_name'] = agent_name
+                            article['agent_id'] = agent_id
+                            article['user_id'] = user_id
+                            all_articles.append(article)
+                        
+                        print(f"      - {len(articles)} artículos encontrados")
+                        agents_processed += 1
+                    else:
+                        print(f"      - Sin artículos recientes")
+                
+                except Exception as e:
+                    print(f"   Error procesando agente {agent.get('name', 'unknown')}: {str(e)}")
+                    continue
+            
+            # Ordenar todos los artículos por fecha de creación (más recientes primero)
+            all_articles.sort(key=lambda x: x.get('createdAt', ''), reverse=True)
+            
+            # Limitar la cantidad total si es necesario
+            max_total_articles = len(all_agents) * limit_per_agent
+            if len(all_articles) > max_total_articles:
+                all_articles = all_articles[:max_total_articles]
+            
+            print(f"RESUMEN: {len(all_articles)} artículos recientes de {agents_processed} agentes")
+            print("Últimos artículos encontrados:")
+            for i, article in enumerate(all_articles[:10]):  # Mostrar solo los primeros 10
+                agent_name = article.get('agent_name', 'N/A')
+                title = article.get('title', 'Sin título')
+                category = article.get('category', 'N/A')
+                print(f"   {i+1}. [{agent_name}] {title} - {category}")
+            
+            if len(all_articles) > 10:
+                print(f"   ... y {len(all_articles) - 10} artículos más")
+            
+            return {
+                "status": "success",
+                "articles": all_articles,
+                "total": len(all_articles),
+                "agents_processed": agents_processed
+            }
+            
+        except Exception as e:
+            print(f"Error obteniendo artículos de todos los agentes: {str(e)}")
             return {
                 "status": "error",
                 "message": str(e),
@@ -359,13 +440,15 @@ class AutomatedTrendsAgent:
             if "images" in results and len(results["images"]) > 0:
                 print(f"   Total de imágenes encontradas: {len(results['images'])}")
                 
-                first_image = results["images"][0]
-                if first_image.get("imageUrl"):
-                    selected_image = first_image["imageUrl"]
-                    title = first_image.get("title", "N/A")
-                    source = first_image.get("source", "N/A")
+                random_index = random.randint(0, len(results["images"]) - 1)
+                selected_image_data = results["images"][random_index]
+                
+                if selected_image_data.get("imageUrl"):
+                    selected_image = selected_image_data["imageUrl"]
+                    title = selected_image_data.get("title", "N/A")
+                    source = selected_image_data.get("source", "N/A")
                     
-                    print(f"   Primera imagen seleccionada:")
+                    print(f"   Imagen seleccionada aleatoriamente (índice {random_index + 1}/{len(results['images'])}):")
                     print(f"      - Título: {title}")
                     print(f"      - Fuente: {source}")
                     print(f"      - URL: {selected_image}")
@@ -1051,35 +1134,45 @@ REGLAS IMPORTANTES:
         return ""
 
     def select_trending_topic(self, trends_data: Dict[str, Any], user_id: int = None) -> Dict[str, Any]:
-        """Permite que ChatGPT seleccione la tendencia más relevante evitando repetir temas"""
+        """Permite que ChatGPT seleccione la tendencia más relevante evitando repetir temas de TODOS los agentes"""
         try:
             trends_data = self._validate_and_parse_data(trends_data, "trends_data")
             
             if user_id is None:
                 user_id = self.agent_config.get('userId', 5822)
             
-            recent_articles = self.get_agent_recent_articles(user_id)
+            # CAMBIO IMPORTANTE: Ahora obtenemos artículos de TODOS los agentes
+            all_recent_articles = self.get_all_agents_recent_articles(limit_per_agent=2)
             recent_articles_text = ""
             
-            if recent_articles.get("status") == "success" and recent_articles.get("articles"):
-                recent_articles_text = "\nARTÍCULOS RECIENTES DEL AGENTE (para evitar repetir temas):\n"
-                for i, article in enumerate(recent_articles["articles"], 1):
+            if all_recent_articles.get("status") == "success" and all_recent_articles.get("articles"):
+                recent_articles_text = "\nARTÍCULOS RECIENTES DE TODOS LOS AGENTES (para evitar repetir temas):\n"
+                recent_articles_text += f"🔍 Total: {all_recent_articles.get('total', 0)} artículos de {all_recent_articles.get('agents_processed', 0)} agentes\n\n"
+                
+                for i, article in enumerate(all_recent_articles["articles"][:15], 1):  # Mostrar máximo 15
                     title = article.get('title', 'Sin título')
                     excerpt = article.get('excerpt', 'Sin descripción')
                     category = article.get('category', 'Sin categoría')
+                    agent_name = article.get('agent_name', 'Agente desconocido')
                     
-                    if len(excerpt) > 150:
-                        excerpt = excerpt[:147] + "..."
+                    if len(excerpt) > 100:
+                        excerpt = excerpt[:97] + "..."
                     
                     recent_articles_text += f"{i}. 📰 {title}\n"
+                    recent_articles_text += f"   👤 Agente: {agent_name}\n"
                     recent_articles_text += f"   📝 {excerpt}\n"
                     recent_articles_text += f"   🏷️ Categoría: {category}\n"
                     recent_articles_text += "\n"
                 
-                recent_articles_text += "🚫 IMPORTANTE: EVITA ELEGIR TENDENCIAS que se relacionen temáticamente con estos artículos recientes.\n"
-                recent_articles_text += "✅ Busca temas DIFERENTES para ofrecer variedad al lector.\n"
+                if all_recent_articles.get('total', 0) > 15:
+                    remaining = all_recent_articles.get('total', 0) - 15
+                    recent_articles_text += f"... y {remaining} artículos más de otros agentes\n\n"
+                
+                recent_articles_text += "🚫 IMPORTANTE: EVITA ELEGIR TENDENCIAS que se relacionen temáticamente con estos artículos recientes de CUALQUIER agente.\n"
+                recent_articles_text += "✅ Busca temas COMPLETAMENTE DIFERENTES para ofrecer variedad al lector.\n"
+                recent_articles_text += "💡 Recuerda que estos artículos son de TODOS los agentes, no solo del tuyo.\n"
             else:
-                recent_articles_text = "\n✨ (No se encontraron artículos recientes - es el primer artículo del agente o agente nuevo)\n"
+                recent_articles_text = "\n✨ (No se encontraron artículos recientes de ningún agente - primera ejecución del sistema)\n"
             
             # Agregar información sobre tendencias ya seleccionadas en esta sesión multi-agente
             already_selected_text = ""
@@ -1189,22 +1282,22 @@ RAZÓN: Tema económico de alto interés público, completamente diferente a los
                             title = topic
                         
                         if title and title not in self._selected_trends_session:
-                            # Verificar también que no sea similar a artículos recientes
-                            recent_articles_list = recent_articles.get("articles", [])
-                            if not self._is_topic_similar_to_recent_articles(title, recent_articles_list):
+                            # Verificar también que no sea similar a artículos recientes de TODOS los agentes
+                            all_articles_list = all_recent_articles.get("articles", [])
+                            if not self._is_topic_similar_to_recent_articles(title, all_articles_list):
                                 selected_position = i
                                 selected_title = title
                                 selected_reason = "Selección automática para evitar duplicados"
                                 print(f"   ✅ Alternativa encontrada: Posición #{i} - {title}")
                                 break
                 else:
-                    return {"status": "error", "message": "No hay tendencias disponibles que no se relacionen con artículos recientes"}
+                    return {"status": "error", "message": "No hay tendencias disponibles que no se relacionen con artículos recientes de todos los agentes"}
             
-            # Validación adicional: verificar similitud con artículos recientes
-            if selected_title and recent_articles.get("articles"):
-                recent_articles_list = recent_articles.get("articles", [])
-                if self._is_topic_similar_to_recent_articles(selected_title, recent_articles_list):
-                    print(f"   ⚠️  ADVERTENCIA: La tendencia '{selected_title}' es muy similar a artículos recientes")
+            # Validación adicional: verificar similitud con artículos recientes de TODOS los agentes
+            if selected_title and all_recent_articles.get("articles"):
+                all_articles_list = all_recent_articles.get("articles", [])
+                if self._is_topic_similar_to_recent_articles(selected_title, all_articles_list):
+                    print(f"   ⚠️  ADVERTENCIA: La tendencia '{selected_title}' es muy similar a artículos recientes de todos los agentes")
                     
                     # Buscar una alternativa no similar
                     trending_topics = trends_data.get("trending_topics", [])
@@ -1212,14 +1305,14 @@ RAZÓN: Tema económico de alto interés público, completamente diferente a los
                         if i not in self._selected_positions_session:
                             title = self._extract_trend_title(trends_data, i)
                             if title and title not in self._selected_trends_session:
-                                if not self._is_topic_similar_to_recent_articles(title, recent_articles_list):
+                                if not self._is_topic_similar_to_recent_articles(title, all_articles_list):
                                     selected_position = i
                                     selected_title = title
                                     selected_reason = "Selección automática para evitar repetición temática"
                                     print(f"   ✅ Alternativa sin similitud encontrada: Posición #{i} - {title}")
                                     break
                     else:
-                        print(f"   ⚠️  No se encontró alternativa, procediendo con la selección original (puede haber similitud)")
+                        print(f"   ⚠️  No se encontró alternativa, procediendo con la selección original (puede haber similitud con todos los agentes)")
             
             if selected_position and selected_title:
                 # Registrar la selección para evitar duplicados futuros
@@ -1329,6 +1422,11 @@ def get_available_agents():
     """Función independiente para obtener agentes disponibles de la API"""
     agent = AutomatedTrendsAgent()
     return agent.get_available_agents()
+
+def get_all_agents_recent_articles(limit_per_agent: int = 2):
+    """Función independiente para obtener artículos recientes de TODOS los agentes"""
+    agent = AutomatedTrendsAgent()
+    return agent.get_all_agents_recent_articles(limit_per_agent)
 
 def initialize_agents_from_api():
     """Función independiente para inicializar agentes desde la API"""
