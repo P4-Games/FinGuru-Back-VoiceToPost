@@ -70,7 +70,29 @@ class TrendsAPI:
                     for idx, item in enumerate(results["trending_searches"]):
                         if idx >= count:
                             break
-                        trending_topics.append({"title": item})
+                        
+                        # Extraer información completa del item
+                        trend_item = {"title": item}
+                        
+                        # Si el item es un diccionario con más información, extraerla
+                        if isinstance(item, dict):
+                            trend_item = {
+                                "title": item.get("query", item.get("title", str(item))),
+                                "query": item.get("query", ""),
+                                "start_timestamp": item.get("start_timestamp"),
+                                "active": item.get("active", True),
+                                "search_volume": item.get("search_volume"),
+                                "increase_percentage": item.get("increase_percentage"),
+                                "categories": item.get("categories", [])
+                            }
+                        elif isinstance(item, str):
+                            trend_item = {
+                                "title": item,
+                                "query": item,
+                                "categories": []
+                            }
+                        
+                        trending_topics.append(trend_item)
                 
                 print(f"✅ Éxito con {key_name}! Encontradas {len(trending_topics)} tendencias")
                 

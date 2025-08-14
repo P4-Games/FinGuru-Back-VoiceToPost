@@ -561,17 +561,39 @@ class AutomatedTrendsAgent:
         if isinstance(trending_topics, list) and trending_topics:
             for i, topic in enumerate(trending_topics, 1):
                 title = ""
+                categories_text = ""
+                search_volume = ""
                 
                 if isinstance(topic, dict):
                     title = topic.get('title', '')
                     if isinstance(title, dict):
                         title = title.get('query', str(title))
+                    
+                    # Extraer categorías
+                    categories = topic.get('categories', [])
+                    if isinstance(categories, list) and categories:
+                        category_names = []
+                        for cat in categories:
+                            if isinstance(cat, dict):
+                                cat_name = cat.get('name', '')
+                                if cat_name:
+                                    category_names.append(cat_name)
+                            elif isinstance(cat, str):
+                                category_names.append(cat)
+                        
+                        if category_names:
+                            categories_text = f" [Categorías: {', '.join(category_names)}]"
+                    
+                    # Extraer volumen de búsqueda si está disponible
+                    volume = topic.get('search_volume')
+                    if volume:
+                        search_volume = f" (Vol: {volume:,})"
+                        
                 elif isinstance(topic, str):
                     title = topic
                 
                 if title:
-                    traffic = "N/A"
-                    trends_text += f"{i}. {title} - {traffic}\n"
+                    trends_text += f"{i}. {title}{categories_text}{search_volume}\n"
         
         additional_info = ""
         
@@ -885,6 +907,18 @@ REGLAS IMPORTANTES:
                 user_id = self.agent_config.get('userId', 5822)
                 selection_result = self.select_trending_topic(trends_data, user_id)
                 
+                # Manejar el caso donde no hay temas adecuados
+                if selection_result.get("status") == "no_suitable_topic":
+                    print(f"   🚫 Agente NO creará artículo - No hay temas adecuados")
+                    return {
+                        "status": "skipped",
+                        "agent_name": self.agent_name,
+                        "agent_id": self.agent_id,
+                        "message": "Agente omitido - No se encontraron temas que cumplan los criterios de calidad",
+                        "reason": selection_result.get("reason", ""),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                
                 if selection_result.get("status") != "success":
                     return {"status": "error", "message": "No se pudo seleccionar tendencia"}
                 
@@ -997,23 +1031,34 @@ REGLAS IMPORTANTES:
             
             successful_agents = [r for r in all_results if r.get("status") == "success"]
             failed_agents = [r for r in all_results if r.get("status") == "error"]
+            skipped_agents = [r for r in all_results if r.get("status") == "skipped"]
             
             print(f"\nRESUMEN MULTI-AGENTE:")
-            print(f"   Exitosos: {len(successful_agents)}")
-            print(f"   Fallidos: {len(failed_agents)}")
-            print(f"   Total procesados: {len(all_results)}")
-            print(f"   Total tendencias únicas usadas: {len(self._selected_trends_session)}")
+            print(f"   ✅ Exitosos: {len(successful_agents)}")
+            print(f"   ❌ Fallidos: {len(failed_agents)}")
+            print(f"   🚫 Omitidos (sin temas adecuados): {len(skipped_agents)}")
+            print(f"   📊 Total procesados: {len(all_results)}")
+            print(f"   🔄 Total tendencias únicas usadas: {len(self._selected_trends_session)}")
+            
             if self._selected_trends_session:
-                print(f"   Tendencias seleccionadas: {list(self._selected_trends_session)}")
+                print(f"   📋 Tendencias seleccionadas: {list(self._selected_trends_session)}")
+                
+            if skipped_agents:
+                print(f"   🚫 Agentes omitidos:")
+                for skipped in skipped_agents:
+                    agent_name = skipped.get("agent_name", "unknown")
+                    reason = skipped.get("reason", "No especificado")
+                    print(f"      - {agent_name}: {reason[:100]}...")
             
             return {
                 "status": "success",
-                "message": f"Proceso multi-agente completado: {len(successful_agents)}/{len(all_results)} exitosos",
+                "message": f"Proceso multi-agente completado: {len(successful_agents)} exitosos, {len(skipped_agents)} omitidos, {len(failed_agents)} fallidos",
                 "results": all_results,
                 "summary": {
                     "total_agents": len(all_results),
                     "successful": len(successful_agents),
                     "failed": len(failed_agents),
+                    "skipped": len(skipped_agents),
                     "unique_trends_used": len(self._selected_trends_session),
                     "trends_selected": list(self._selected_trends_session)
                 }
@@ -1187,20 +1232,43 @@ REGLAS IMPORTANTES:
             if isinstance(trending_topics, list) and trending_topics:
                 for i, topic in enumerate(trending_topics, 1):
                     title = ""
+                    categories_text = ""
+                    search_volume = ""
                     
                     if isinstance(topic, dict):
                         title = topic.get('title', '')
                         if isinstance(title, dict):
                             title = title.get('query', str(title))
+                        
+                        # Extraer categorías
+                        categories = topic.get('categories', [])
+                        if isinstance(categories, list) and categories:
+                            category_names = []
+                            for cat in categories:
+                                if isinstance(cat, dict):
+                                    cat_name = cat.get('name', '')
+                                    if cat_name:
+                                        category_names.append(cat_name)
+                                elif isinstance(cat, str):
+                                    category_names.append(cat)
+                            
+                            if category_names:
+                                categories_text = f" [Categorías: {', '.join(category_names)}]"
+                        
+                        # Extraer volumen de búsqueda si está disponible
+                        volume = topic.get('search_volume')
+                        if volume:
+                            search_volume = f" (Vol: {volume:,})"
+                            
                     elif isinstance(topic, str):
                         title = topic
                     
                     if title:
                         # Marcar tendencias ya seleccionadas
                         if i in self._selected_positions_session or title in self._selected_trends_session:
-                            trends_text += f"{i}. ❌ {title} - [YA SELECCIONADA - NO USAR]\n"
+                            trends_text += f"{i}. ❌ {title}{categories_text}{search_volume} - [YA SELECCIONADA - NO USAR]\n"
                         else:
-                            trends_text += f"{i}. {title}\n"
+                            trends_text += f"{i}. {title}{categories_text}{search_volume}\n"
             
             selection_prompt = f"""Eres un editor de noticias especializado en Argentina. Te proporciono las 10 tendencias actuales más populares en Argentina.
 
@@ -1218,22 +1286,29 @@ TENDENCIAS ACTUALES (últimas 24h):
 - ❌ PROHIBIDO: NO elijas tendencias marcadas con "❌ [YA SELECCIONADA - NO USAR]"
 - ❌ PROHIBIDO: NO elijas tendencias que tengan relación temática con los artículos recientes mostrados
 - ✅ OBLIGATORIO: SOLO elige entre las tendencias SIN la marca ❌
+- 🔍 VALIDACIÓN: Si NINGUNA tendencia cumple con los criterios de calidad, responde "NO_SUITABLE_TOPIC"
 
 🔍 ANÁLISIS REQUERIDO:
 1. Revisa cada tendencia disponible (sin ❌)
 2. Compara con los artículos recientes para evitar similitudes
-3. Elige la tendencia más relevante
-4. Justifica por qué es diferente a lo ya publicado
+3. Evalúa si alguna tendencia cumple realmente con tus criterios de calidad
+4. Si encuentras una tendencia adecuada, elige la más relevante
+5. Si NO encuentras ninguna tendencia que valga la pena, responde "NO_SUITABLE_TOPIC"
 
 FORMATO DE RESPUESTA OBLIGATORIO:
-POSICIÓN: [número del 1 al 10]
-TÍTULO: [título exacto de la tendencia elegida]
-RAZÓN: [explicación detallada de por qué la elegiste y cómo es DIFERENTE a los artículos recientes]
+POSICIÓN: [número del 1 al 10 O "NO_SUITABLE_TOPIC"]
+TÍTULO: [título exacto de la tendencia elegida O "NINGUNO"]
+RAZÓN: [explicación detallada de por qué la elegiste y cómo es DIFERENTE a los artículos recientes, O por qué ninguna tendencia es adecuada]
 
-Ejemplo:
+Ejemplo exitoso:
 POSICIÓN: 3
 TÍTULO: dólar blue argentina
-RAZÓN: Tema económico de alto interés público, completamente diferente a los artículos previos"""
+RAZÓN: Tema económico de alto interés público, completamente diferente a los artículos previos
+
+Ejemplo sin tema adecuado:
+POSICIÓN: NO_SUITABLE_TOPIC
+TÍTULO: NINGUNO
+RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia para Argentina o son muy similares a artículos recientes"""
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -1256,14 +1331,30 @@ RAZÓN: Tema económico de alto interés público, completamente diferente a los
             for line in lines:
                 line = line.strip()
                 if line.startswith('POSICIÓN:'):
-                    try:
-                        selected_position = int(line.replace('POSICIÓN:', '').strip())
-                    except ValueError:
-                        pass
+                    position_text = line.replace('POSICIÓN:', '').strip()
+                    if position_text == "NO_SUITABLE_TOPIC":
+                        selected_position = "NO_SUITABLE_TOPIC"
+                    else:
+                        try:
+                            selected_position = int(position_text)
+                        except ValueError:
+                            pass
                 elif line.startswith('TÍTULO:'):
                     selected_title = line.replace('TÍTULO:', '').strip()
+                    if selected_title == "NINGUNO":
+                        selected_title = "NO_SUITABLE_TOPIC"
                 elif line.startswith('RAZÓN:'):
                     selected_reason = line.replace('RAZÓN:', '').strip()
+            
+            # Manejar el caso donde no se encuentra un tema adecuado
+            if selected_position == "NO_SUITABLE_TOPIC" or selected_title == "NO_SUITABLE_TOPIC":
+                print(f"   🚫 ChatGPT determinó que NO hay temas adecuados")
+                print(f"   Razón: {selected_reason}")
+                return {
+                    "status": "no_suitable_topic",
+                    "message": "No se encontró ningún tema que cumpla con los criterios de calidad",
+                    "reason": selected_reason
+                }
             
             # Verificar que no se haya seleccionado una tendencia ya usada
             if selected_position in self._selected_positions_session or selected_title in self._selected_trends_session:
@@ -1349,6 +1440,18 @@ RAZÓN: Tema económico de alto interés público, completamente diferente a los
                 print("2. Permitiendo que ChatGPT seleccione la tendencia más relevante...")
                 user_id = self.agent_config.get('userId', 5822)
                 selection_result = self.select_trending_topic(trends_data, user_id)
+                
+                # Manejar el caso donde no hay temas adecuados
+                if selection_result.get("status") == "no_suitable_topic":
+                    print(f"   🚫 Agente '{self.agent_name}' NO creará artículo - No hay temas adecuados")
+                    return {
+                        "status": "skipped",
+                        "agent_name": self.agent_name,
+                        "agent_id": self.agent_id,
+                        "message": "Agente omitido - No se encontraron temas que cumplan los criterios de calidad",
+                        "reason": selection_result.get("reason", ""),
+                        "timestamp": datetime.now().isoformat()
+                    }
                 
                 if selection_result.get("status") != "success":
                     return {"status": "error", "message": "No se pudo seleccionar tendencia"}
