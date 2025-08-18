@@ -30,7 +30,6 @@ class AutomatedTrendsAgent:
         self.trends_api = TrendsAPI()
         self.api_endpoint = "https://fin.guru/api/agent-publish-article"
         
-        # Configuración de API para obtener agentes
         self.next_public_api_url = os.getenv("NEXT_PUBLIC_API_URL")
         self.sudo_api_key = os.getenv("SUDO_API_KEY")
         
@@ -43,30 +42,45 @@ class AutomatedTrendsAgent:
         self.format_markdown = self.agent_config.get('format_markdown', '')
         
     def _is_topic_similar_to_recent_articles(self, topic_title: str, recent_articles: List[Dict]) -> bool:
-        """Verifica si un tópico es similar a los artículos recientes usando palabras clave"""
+        """Verifica si un tópico es similar a los artículos recientes usando palabras clave específicas"""
         if not recent_articles or not topic_title:
             return False
         
-        # Palabras clave del tópico actual
-        topic_keywords = set(topic_title.lower().split())
+        generic_words = {
+            'argentina', 'argentino', 'argentinos', 'argentinas', 'país', 'nacional', 'gobierno', 
+            'política', 'político', 'políticos', 'políticas', 'deportes', 'deporte', 'deportivos',
+            'economia', 'económico', 'económicos', 'económicas', 'tecnología', 'tecnológico',
+            'entretenimiento', 'cultura', 'cultural', 'sociales', 'social', 'nuevo', 'nueva',
+            'últimas', 'último', 'noticias', 'noticia', 'actualidad', 'hoy', 'ayer', 'semana',
+            'mes', 'año', 'día', 'mundo', 'internacional', 'global', 'local', 'nacional',
+            'público', 'pública', 'privado', 'privada', 'importante', 'gran', 'grande', 'mayor',
+            'mejor', 'primera', 'primer', 'segundo', 'tercero', 'sobre', 'para', 'con', 'sin',
+            'desde', 'hasta', 'entre', 'por', 'en', 'de', 'del', 'la', 'el', 'los', 'las',
+            'un', 'una', 'unos', 'unas', 'este', 'esta', 'estos', 'estas', 'ese', 'esa'
+        }
+        
+        topic_keywords = set(word.lower() for word in topic_title.lower().split() 
+                           if word.lower() not in generic_words and len(word) > 2)
         
         for article in recent_articles:
             article_title = article.get('title', '').lower()
             article_excerpt = article.get('excerpt', '').lower()
             
-            # Palabras clave del artículo
+            # Palabras clave del artículo (sin palabras genéricas)
             article_keywords = set()
-            article_keywords.update(article_title.split())
-            article_keywords.update(article_excerpt.split())
+            for word in (article_title + ' ' + article_excerpt).split():
+                if word.lower() not in generic_words and len(word) > 2:
+                    article_keywords.add(word.lower())
             
-            # Calcular similitud (intersección de palabras clave)
+            # Calcular similitud (intersección de palabras clave específicas)
             common_keywords = topic_keywords.intersection(article_keywords)
             
-            if len(common_keywords) >= 2:
+            # Ser más estricto: requiere al menos 3 palabras específicas en común Y alta similitud
+            if len(common_keywords) >= 3:
                 similarity_ratio = len(common_keywords) / max(len(topic_keywords), 1)
-                if similarity_ratio > 0.4:
-                    print(f"   ⚠️ Tópico '{topic_title}' similar a artículo '{article.get('title')}' (similitud: {similarity_ratio:.2f})")
-                    print(f"   🔑 Palabras en común: {list(common_keywords)}")
+                if similarity_ratio > 0.6:  # Aumentar el umbral a 60%
+                    print(f"   ⚠️ Tópico '{topic_title}' MUY similar a artículo '{article.get('title')}' (similitud: {similarity_ratio:.2f})")
+                    print(f"   🔑 Palabras específicas en común: {list(common_keywords)}")
                     return True
         
         return False
@@ -354,7 +368,7 @@ class AutomatedTrendsAgent:
             geo="AR", 
             hours=24,
             language="es-419",
-            count=10        
+            count=16
         )
         
         if trends_data.get("status") == "success":
@@ -414,7 +428,7 @@ class AutomatedTrendsAgent:
             return {}
     
     def search_google_images(self, query: str) -> str:
-        """Busca una imagen relevante usando Serper API"""
+        """Busca una imagen relevante usando Serper API con múltiples intentos"""
         try:
             url = "https://google.serper.dev/images"
             
@@ -422,7 +436,8 @@ class AutomatedTrendsAgent:
                 "q": query,
                 "location": "Argentina",
                 "gl": "ar",
-                "hl": "es-419"
+                "hl": "es-419",
+                "num": 15
             })
             
             headers = {
@@ -435,31 +450,55 @@ class AutomatedTrendsAgent:
             
             results = response.json()
             
-            print(f"   Buscando imágenes con Serper para: {query}")
+            print(f"      Buscando imágenes para: {query[:50]}...")
             
             if "images" in results and len(results["images"]) > 0:
-                print(f"   Total de imágenes encontradas: {len(results['images'])}")
+                images_list = results["images"]
+                print(f"      {len(images_list)} imágenes encontradas, probando hasta encontrar una válida...")
                 
-                random_index = random.randint(0, len(results["images"]) - 1)
-                selected_image_data = results["images"][random_index]
+                max_attempts = min(10, len(images_list))
+                tested_urls = []
                 
-                if selected_image_data.get("imageUrl"):
-                    selected_image = selected_image_data["imageUrl"]
-                    title = selected_image_data.get("title", "N/A")
-                    source = selected_image_data.get("source", "N/A")
-                    
-                    print(f"   Imagen seleccionada aleatoriamente (índice {random_index + 1}/{len(results['images'])}):")
-                    print(f"      - Título: {title}")
-                    print(f"      - Fuente: {source}")
-                    print(f"      - URL: {selected_image}")
-                    
-                    return selected_image
+                for attempt in range(max_attempts):
+                    try:
+                        if attempt == 0:
+                            img_index = random.randint(0, len(images_list) - 1)
+                        else:
+                            img_index = attempt % len(images_list)
+                        
+                        selected_image_data = images_list[img_index]
+                        image_url = selected_image_data.get("imageUrl")
+                        
+                        if not image_url or image_url in tested_urls:
+                            continue
+                            
+                        tested_urls.append(image_url)
+                        
+                        if self._is_valid_image_url(image_url):
+                            title = selected_image_data.get("title", "N/A")
+                            source = selected_image_data.get("source", "N/A")
+                            
+                            print(f"      ✅ Imagen #{attempt + 1} seleccionada (índice {img_index + 1}/{len(images_list)}):")
+                            print(f"         - Título: {title[:50]}...")
+                            print(f"         - Fuente: {source}")
+                            print(f"         - URL: {image_url}")
+                            
+                            return image_url
+                        else:
+                            print(f"      ❌ Imagen #{attempt + 1} inválida: {image_url}")
+                            
+                    except Exception as e:
+                        print(f"      ❌ Error procesando imagen #{attempt + 1}: {str(e)}")
+                        continue
+                
+                print(f"      ❌ Ninguna de las {max_attempts} imágenes probadas fue válida")
+            else:
+                print("      ❌ No se encontraron imágenes en la respuesta")
             
-            print("   No se encontraron imágenes válidas")
             return ""
             
         except Exception as e:
-            print(f"   Error buscando imágenes con Serper: {str(e)}")
+            print(f"      ❌ Error buscando imágenes con Serper: {str(e)}")
             return ""
     
     def _convert_serper_to_serpapi_format(self, serper_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -494,61 +533,96 @@ class AutomatedTrendsAgent:
         return converted
     
     def _is_valid_image_url(self, url: str) -> bool:
-        """Verifica si la URL de imagen es válida"""
-        if not url:
+        """Verifica si la URL de imagen es válida con criterios más permisivos"""
+        if not url or len(url) < 10:
             return False
         
-        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp']
-        if not any(url.lower().endswith(ext) for ext in valid_extensions):
-            if not any(domain in url.lower() for domain in ['images', 'img', 'photo', 'pic']):
-                return False
-        
-        blocked_domains = ['data:', 'javascript:', 'blob:', 'chrome-extension:']
+        blocked_domains = ['data:', 'javascript:', 'blob:', 'chrome-extension:', 'about:', 'file:']
         if any(url.lower().startswith(blocked) for blocked in blocked_domains):
+            return False
+        
+        if not (url.lower().startswith('http://') or url.lower().startswith('https://')):
+            return False
+        
+        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
+        has_valid_extension = any(url.lower().endswith(ext) for ext in valid_extensions)
+        
+        image_indicators = ['images', 'img', 'photo', 'pic', 'thumb', 'avatar', 'logo', 'banner']
+        has_image_indicator = any(indicator in url.lower() for indicator in image_indicators)
+        
+        image_domains = ['imgur.com', 'flickr.com', 'cloudinary.com', 'amazonaws.com', 'googleusercontent.com', 
+                        'fbcdn.net', 'cdninstagram.com', 'pinimg.com', 'wikimedia.org', 'unsplash.com']
+        has_image_domain = any(domain in url.lower() for domain in image_domains)
+        
+        if has_valid_extension or has_image_indicator or has_image_domain:
+            return True
+        
+        if len(url) > 500:
             return False
             
         return True
     
     def download_image_from_url(self, url: str) -> Optional[bytes]:
-        """Descarga una imagen desde una URL"""
+        """Descarga una imagen desde una URL con validaciones mejoradas"""
         try:
-            print(f"   Descargando imagen desde: {url}")
+            print(f"      Descargando imagen desde: {url}")
             
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Accept': 'image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
             }
             
-            response = requests.get(url, headers=headers, timeout=15, stream=True)
+            response = requests.get(url, headers=headers, timeout=30, stream=True)
             response.raise_for_status()
             
             content_type = response.headers.get('content-type', '').lower()
-            if not any(img_type in content_type for img_type in ['image/', 'jpeg', 'jpg', 'png', 'webp']):
-                print(f"   Tipo de contenido no válido: {content_type}")
-                return None
+            valid_content_types = ['image/', 'jpeg', 'jpg', 'png', 'webp', 'gif', 'bmp']
+            
+            if not any(img_type in content_type for img_type in valid_content_types):
+                print(f"      ⚠️ Tipo de contenido no típico: {content_type} - Intentando descargar de todos modos")
             
             image_data = response.content
             
-            if len(image_data) < 1024:
-                print(f"   Imagen muy pequeña: {len(image_data)} bytes")
+            if len(image_data) < 500: 
+                print(f"      ❌ Imagen muy pequeña: {len(image_data)} bytes")
+                return None
+                
+            if len(image_data) > 10 * 1024 * 1024:
+                print(f"      ❌ Imagen muy grande: {len(image_data)} bytes")
                 return None
             
             try:
                 from PIL import Image
-                Image.open(io.BytesIO(image_data)).verify()
-                print(f"   Imagen descargada exitosamente: {len(image_data)} bytes")
+                img_obj = Image.open(io.BytesIO(image_data))
+                img_obj.verify()
+                
+                width, height = img_obj.size
+                if width < 100 or height < 100:
+                    print(f"      ❌ Imagen muy pequeña: {width}x{height} pixels")
+                    return None
+                    
+                print(f"      ✅ Imagen válida: {len(image_data)} bytes, {width}x{height} pixels")
                 return image_data
+                
             except ImportError:
-                print(f"   Imagen descargada (sin verificación PIL): {len(image_data)} bytes")
+                print(f"      ✅ Imagen descargada (sin verificación PIL): {len(image_data)} bytes")
                 return image_data
             except Exception as e:
-                print(f"   Error verificando imagen con PIL: {str(e)}")
-                return None
+                print(f"      ⚠️ Error verificando imagen con PIL: {str(e)} - Usando imagen de todos modos")
+                return image_data
                 
+        except requests.exceptions.Timeout:
+            print(f"      ❌ Timeout descargando imagen")
+            return None
         except requests.exceptions.RequestException as e:
-            print(f"   Error descargando imagen: {str(e)}")
+            print(f"      ❌ Error descargando imagen: {str(e)}")
             return None
         except Exception as e:
-            print(f"   Error inesperado descargando imagen: {str(e)}")            
+            print(f"      ❌ Error inesperado descargando imagen: {str(e)}")            
             return None
     
     def create_prompt(self, trends_data: Dict[str, Any], search_results: Dict[str, Any], selected_trend: str, topic_position: int = None) -> str:
@@ -569,7 +643,6 @@ class AutomatedTrendsAgent:
                     if isinstance(title, dict):
                         title = title.get('query', str(title))
                     
-                    # Extraer categorías
                     categories = topic.get('categories', [])
                     if isinstance(categories, list) and categories:
                         category_names = []
@@ -584,7 +657,6 @@ class AutomatedTrendsAgent:
                         if category_names:
                             categories_text = f" [Categorías: {', '.join(category_names)}]"
                     
-                    # Extraer volumen de búsqueda si está disponible
                     volume = topic.get('search_volume')
                     if volume:
                         search_volume = f" (Vol: {volume:,})"
@@ -786,62 +858,77 @@ REGLAS IMPORTANTES:
         """Publica el artículo en fin.guru con imagen descargada"""
         try:
             cover_image_data = None
-            image_source = "fallback"
+            image_source = "none"
+            search_attempts = []
+        
+            search_queries = []
             
-            if isinstance(search_results, str):
-                try:
-                    search_results = json.loads(search_results)
-                except json.JSONDecodeError:
-                    print("   Error parseando search_results JSON")
-                    search_results = {}
-            
-            search_title_for_image = None
-            image_source_type = None
-            
+            # 1. Título de top story si está disponible
             if isinstance(search_results, dict) and "top_stories" in search_results:
                 top_stories = search_results["top_stories"]
                 if isinstance(top_stories, list) and top_stories:
-                    print("   Buscando título en top_stories para búsqueda de imagen...")
-                    for i, story in enumerate(top_stories[:3]):
+                    for story in top_stories[:2]: 
                         if isinstance(story, dict):
                             story_title = story.get('title', '')
                             if story_title:
-                                search_title_for_image = story_title
-                                image_source_type = "top_story"
-                                print(f"   Título seleccionado de top_story #{i+1}: {story_title}")
-                                break
+                                search_queries.append(("top_story", story_title))
             
-            if not search_title_for_image and isinstance(search_results, dict) and "organic_results" in search_results:
+            # 2. Título de resultado orgánico si está disponible
+            if isinstance(search_results, dict) and "organic_results" in search_results:
                 organic_results = search_results["organic_results"]
                 if isinstance(organic_results, list) and organic_results:
-                    print("   No hay top_stories, buscando título en organic_results para búsqueda de imagen...")
-                    for i, result in enumerate(organic_results[:3]):
+                    for result in organic_results[:2]: 
                         if isinstance(result, dict):
                             result_title = result.get('title', '')
                             if result_title:
-                                search_title_for_image = result_title
-                                image_source_type = "organic_result"
-                                print(f"   Título seleccionado de organic_result #{i+1}: {result_title}")
-                                break
+                                search_queries.append(("organic_result", result_title))
             
-            if not search_title_for_image:
-                search_title_for_image = trend_title
-                image_source_type = "trend_title"
-                print(f"   Usando trend_title como fallback: {trend_title}")
+            # 3. Tendencia original
+            search_queries.append(("trend_title", trend_title))
             
-            print(f"   Buscando imagen con Google Images para: {search_title_for_image}")
-            image_url = self.search_google_images(search_title_for_image)
-            if image_url:
-                cover_image_data = self.download_image_from_url(image_url)
-                if cover_image_data:
-                    image_source = f"google_images_from_{image_source_type}"
-                    print(f"   Imagen descargada exitosamente desde Google Images")
-                else:
-                    print("   Error descargando imagen desde Google Images")
-                    return {"status": "error", "message": "No se pudo descargar imagen para el artículo"}
-            else:
-                print("   No se encontró imagen en Google Images")
-                return {"status": "error", "message": "No se pudo encontrar imagen para el artículo"}
+            # 4. Consultas de fallback más genéricas
+            search_queries.append(("generic_argentina", f"argentina noticias {trend_title.split()[0] if trend_title else 'actualidad'}"))
+            search_queries.append(("generic_news", f"noticias argentina tendencias"))
+            search_queries.append(("fallback", "argentina noticias actualidad"))
+            
+            print(f"   Intentando buscar imagen con {len(search_queries)} estrategias diferentes...")
+            
+            # Intentar cada consulta hasta encontrar una imagen válida
+            for attempt_num, (source_type, query) in enumerate(search_queries, 1):
+                try:
+                    print(f"   Intento {attempt_num}/{len(search_queries)}: Buscando con '{query}' ({source_type})")
+                    search_attempts.append(f"{attempt_num}. {source_type}: {query[:50]}...")
+                    
+                    image_url = self.search_google_images(query)
+                    if image_url:
+                        print(f"   ✅ URL de imagen encontrada: {image_url}")
+                        downloaded_data = self.download_image_from_url(image_url)
+                        if downloaded_data:
+                            cover_image_data = downloaded_data
+                            image_source = f"google_images_from_{source_type}_attempt_{attempt_num}"
+                            print(f"   ✅ Imagen descargada exitosamente en intento {attempt_num}")
+                            break
+                        else:
+                            print(f"   ❌ Error descargando imagen en intento {attempt_num}")
+                    else:
+                        print(f"   ❌ No se encontró URL de imagen en intento {attempt_num}")
+                        
+                except Exception as e:
+                    print(f"   ❌ Error en intento {attempt_num}: {str(e)}")
+                    continue
+            
+            # Si no se pudo obtener imagen después de todos los intentos
+            if not cover_image_data:
+                print(f"   🚫 CRÍTICO: No se pudo obtener imagen después de {len(search_queries)} intentos")
+                print("   📋 Intentos realizados:")
+                for attempt in search_attempts:
+                    print(f"      {attempt}")
+                return {
+                    "status": "error", 
+                    "message": "CRÍTICO: No se pudo encontrar ninguna imagen válida para el artículo después de múltiples intentos",
+                    "search_attempts": search_attempts,
+                    "queries_tried": [q[1] for q in search_queries]
+                }
             
             print(f"   Fuente de imagen utilizada: {image_source}")
             
@@ -971,7 +1058,6 @@ REGLAS IMPORTANTES:
         try:
             print(f"[{datetime.now()}] Iniciando proceso multi-agente...")
             
-            # Limpiar cache de sesión para evitar duplicados entre ejecuciones
             self._selected_trends_session.clear()
             self._selected_positions_session.clear()
             print("🔄 Cache de sesión limpiado - tendencias frescas para todos los agentes")
@@ -1186,7 +1272,6 @@ REGLAS IMPORTANTES:
             if user_id is None:
                 user_id = self.agent_config.get('userId', 5822)
             
-            # CAMBIO IMPORTANTE: Ahora obtenemos artículos de TODOS los agentes
             all_recent_articles = self.get_all_agents_recent_articles(limit_per_agent=2)
             recent_articles_text = ""
             
@@ -1213,13 +1298,13 @@ REGLAS IMPORTANTES:
                     remaining = all_recent_articles.get('total', 0) - 15
                     recent_articles_text += f"... y {remaining} artículos más de otros agentes\n\n"
                 
-                recent_articles_text += "🚫 IMPORTANTE: EVITA ELEGIR TENDENCIAS que se relacionen temáticamente con estos artículos recientes de CUALQUIER agente.\n"
-                recent_articles_text += "✅ Busca temas COMPLETAMENTE DIFERENTES para ofrecer variedad al lector.\n"
-                recent_articles_text += "💡 Recuerda que estos artículos son de TODOS los agentes, no solo del tuyo.\n"
+                recent_articles_text += "🚫 IMPORTANTE: EVITA ELEGIR TENDENCIAS que sean muy similares en CONTENIDO ESPECÍFICO a estos artículos recientes.\n"
+                recent_articles_text += "✅ Puedes elegir la MISMA CATEGORÍA (deportes, política, etc.) pero con un TEMA DIFERENTE.\n"
+                recent_articles_text += "💡 Ejemplo: Si hay un artículo sobre 'Messi gana Balón de Oro', puedes escribir sobre 'River vs Boca' (ambos deportes, pero temas diferentes).\n"
+                recent_articles_text += "🎯 Solo evita temas que hablen exactamente del mismo evento, persona o noticia específica.\n"
             else:
                 recent_articles_text = "\n✨ (No se encontraron artículos recientes de ningún agente - primera ejecución del sistema)\n"
             
-            # Agregar información sobre tendencias ya seleccionadas en esta sesión multi-agente
             already_selected_text = ""
             if self._selected_trends_session:
                 already_selected_text = "\nTENDENCIAS YA SELECCIONADAS EN ESTA SESIÓN (NO ELEGIR ESTAS):\n"
@@ -1240,7 +1325,6 @@ REGLAS IMPORTANTES:
                         if isinstance(title, dict):
                             title = title.get('query', str(title))
                         
-                        # Extraer categorías
                         categories = topic.get('categories', [])
                         if isinstance(categories, list) and categories:
                             category_names = []
@@ -1264,13 +1348,12 @@ REGLAS IMPORTANTES:
                         title = topic
                     
                     if title:
-                        # Marcar tendencias ya seleccionadas
                         if i in self._selected_positions_session or title in self._selected_trends_session:
                             trends_text += f"{i}. ❌ {title}{categories_text}{search_volume} - [YA SELECCIONADA - NO USAR]\n"
                         else:
                             trends_text += f"{i}. {title}{categories_text}{search_volume}\n"
             
-            selection_prompt = f"""Eres un editor de noticias especializado en Argentina. Te proporciono las 10 tendencias actuales más populares en Argentina.
+            selection_prompt = f"""Eres un editor de noticias especializado en Argentina. Te proporciono las 16 tendencias actuales más populares en Argentina.
 
 TENDENCIAS ACTUALES (últimas 24h):
 {trends_text}
@@ -1284,31 +1367,32 @@ TENDENCIAS ACTUALES (últimas 24h):
 
 🚫 REGLAS ESTRICTAS - NO VIOLAR:
 - ❌ PROHIBIDO: NO elijas tendencias marcadas con "❌ [YA SELECCIONADA - NO USAR]"
-- ❌ PROHIBIDO: NO elijas tendencias que tengan relación temática con los artículos recientes mostrados
+- ❌ PROHIBIDO: NO elijas tendencias sobre el MISMO evento/persona/noticia específica de los artículos recientes
+- ✅ PERMITIDO: Puedes elegir la MISMA CATEGORÍA pero con tema específico diferente
 - ✅ OBLIGATORIO: SOLO elige entre las tendencias SIN la marca ❌
-- 🔍 VALIDACIÓN: Si NINGUNA tendencia cumple con los criterios de calidad, responde "NO_SUITABLE_TOPIC"
+- 🔍 VALIDACIÓN: Si NINGUNA tendencia cumple con los criterios, responde "NO_SUITABLE_TOPIC"
 
 🔍 ANÁLISIS REQUERIDO:
 1. Revisa cada tendencia disponible (sin ❌)
-2. Compara con los artículos recientes para evitar similitudes
-3. Evalúa si alguna tendencia cumple realmente con tus criterios de calidad
-4. Si encuentras una tendencia adecuada, elige la más relevante
+2. Compara CONTENIDO ESPECÍFICO (no categorías) con los artículos recientes 
+3. Evalúa si la tendencia habla del mismo evento/persona/noticia específica
+4. Si encuentras una tendencia con contenido específico diferente, elige la más relevante
 5. Si NO encuentras ninguna tendencia que valga la pena, responde "NO_SUITABLE_TOPIC"
 
 FORMATO DE RESPUESTA OBLIGATORIO:
-POSICIÓN: [número del 1 al 10 O "NO_SUITABLE_TOPIC"]
+POSICIÓN: [número del 1 al 16 O "NO_SUITABLE_TOPIC"]
 TÍTULO: [título exacto de la tendencia elegida O "NINGUNO"]
-RAZÓN: [explicación detallada de por qué la elegiste y cómo es DIFERENTE a los artículos recientes, O por qué ninguna tendencia es adecuada]
+RAZÓN: [explicación detallada de por qué la elegiste y cómo el CONTENIDO ESPECÍFICO es diferente a los artículos recientes, O por qué ninguna tendencia es adecuada]
 
 Ejemplo exitoso:
 POSICIÓN: 3
 TÍTULO: dólar blue argentina
-RAZÓN: Tema económico de alto interés público, completamente diferente a los artículos previos
+RAZÓN: Aunque hay artículos de economía recientes, este tema específico sobre el dólar blue es diferente del contenido ya publicado sobre inflación
 
 Ejemplo sin tema adecuado:
 POSICIÓN: NO_SUITABLE_TOPIC
 TÍTULO: NINGUNO
-RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia para Argentina o son muy similares a artículos recientes"""
+RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos específicos ya cubiertos en artículos recientes"""
 
             response = self.openai_client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -1316,8 +1400,8 @@ RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia pa
                     {"role": "system", "content": "Eres un editor experto en seleccionar noticias relevantes para Argentina. Evita repetir temas ya cubiertos y NUNCA elijas tendencias marcadas como YA SELECCIONADAS. Responde exactamente en el formato solicitado."},
                     {"role": "user", "content": selection_prompt}
                 ],
-                max_tokens=150,  # Aumentar tokens para la razón más detallada
-                temperature=0.3  # Baja temperatura para respuestas más consistentes
+                max_tokens=150,  
+                temperature=0.3 
             )
             
             selection_response = response.choices[0].message.content.strip()
@@ -1346,7 +1430,6 @@ RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia pa
                 elif line.startswith('RAZÓN:'):
                     selected_reason = line.replace('RAZÓN:', '').strip()
             
-            # Manejar el caso donde no se encuentra un tema adecuado
             if selected_position == "NO_SUITABLE_TOPIC" or selected_title == "NO_SUITABLE_TOPIC":
                 print(f"   🚫 ChatGPT determinó que NO hay temas adecuados")
                 print(f"   Razón: {selected_reason}")
@@ -1356,11 +1439,9 @@ RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia pa
                     "reason": selected_reason
                 }
             
-            # Verificar que no se haya seleccionado una tendencia ya usada
             if selected_position in self._selected_positions_session or selected_title in self._selected_trends_session:
                 print(f"   ⚠️  ADVERTENCIA: ChatGPT eligió una tendencia ya seleccionada. Buscando alternativa...")
                 
-                # Buscar una tendencia no usada
                 trending_topics = trends_data.get("trending_topics", [])
                 for i, topic in enumerate(trending_topics, 1):
                     if i not in self._selected_positions_session:
@@ -1373,7 +1454,6 @@ RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia pa
                             title = topic
                         
                         if title and title not in self._selected_trends_session:
-                            # Verificar también que no sea similar a artículos recientes de TODOS los agentes
                             all_articles_list = all_recent_articles.get("articles", [])
                             if not self._is_topic_similar_to_recent_articles(title, all_articles_list):
                                 selected_position = i
@@ -1384,13 +1464,11 @@ RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia pa
                 else:
                     return {"status": "error", "message": "No hay tendencias disponibles que no se relacionen con artículos recientes de todos los agentes"}
             
-            # Validación adicional: verificar similitud con artículos recientes de TODOS los agentes
             if selected_title and all_recent_articles.get("articles"):
                 all_articles_list = all_recent_articles.get("articles", [])
                 if self._is_topic_similar_to_recent_articles(selected_title, all_articles_list):
                     print(f"   ⚠️  ADVERTENCIA: La tendencia '{selected_title}' es muy similar a artículos recientes de todos los agentes")
                     
-                    # Buscar una alternativa no similar
                     trending_topics = trends_data.get("trending_topics", [])
                     for i, topic in enumerate(trending_topics, 1):
                         if i not in self._selected_positions_session:
@@ -1406,7 +1484,6 @@ RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia pa
                         print(f"   ⚠️  No se encontró alternativa, procediendo con la selección original (puede haber similitud con todos los agentes)")
             
             if selected_position and selected_title:
-                # Registrar la selección para evitar duplicados futuros
                 self._selected_positions_session.add(selected_position)
                 self._selected_trends_session.add(selected_title)
                 
@@ -1441,7 +1518,6 @@ RAZÓN: Las tendencias disponibles no cumplen con los criterios de relevancia pa
                 user_id = self.agent_config.get('userId', 5822)
                 selection_result = self.select_trending_topic(trends_data, user_id)
                 
-                # Manejar el caso donde no hay temas adecuados
                 if selection_result.get("status") == "no_suitable_topic":
                     print(f"   🚫 Agente '{self.agent_name}' NO creará artículo - No hay temas adecuados")
                     return {
@@ -1517,7 +1593,6 @@ def run_multi_trends_agents(topic_position: int = None):
     Args:
         topic_position: Posición específica (1-10) o None para selección automática por ChatGPT
     """
-    # Crear una instancia base para coordinar el proceso
     coordinator = AutomatedTrendsAgent()
     return coordinator.run_multi_agent_process(topic_position)
 
