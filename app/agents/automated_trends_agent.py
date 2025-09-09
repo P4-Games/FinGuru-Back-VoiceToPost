@@ -932,15 +932,49 @@ REGLAS IMPORTANTES:
             
             print(f"   Fuente de imagen utilizada: {image_source}")
             
+            if not cover_image_data or len(cover_image_data) == 0:
+                print("   🚫 ERROR CRÍTICO: cover_image_data está vacío justo antes de subir")
+                return {
+                    "status": "error", 
+                    "message": "ERROR CRÍTICO: No hay datos de imagen válidos para subir el artículo"
+                }
+            
             filename = article_data['fileName']
             print(f"   Creando archivo: {filename} ({len(cover_image_data)} bytes)")
             
-            image_file = io.BytesIO(cover_image_data)
-            image_file.name = filename
+            try:
+                image_file = io.BytesIO(cover_image_data)
+                image_file.name = filename
+                
+                image_file.seek(0, 2)
+                size = image_file.tell() 
+                image_file.seek(0)
+                
+                if size == 0:
+                    print("   🚫 ERROR CRÍTICO: El archivo BytesIO está vacío")
+                    return {
+                        "status": "error", 
+                        "message": "ERROR CRÍTICO: El archivo de imagen está vacío"
+                    }
+                
+                print(f"   ✅ Archivo BytesIO creado correctamente: {size} bytes")
+                
+            except Exception as e:
+                print(f"   🚫 ERROR CRÍTICO creando BytesIO: {str(e)}")
+                return {
+                    "status": "error", 
+                    "message": f"ERROR CRÍTICO creando archivo de imagen: {str(e)}"
+                }
             
             files = {
                 'cover': (filename, image_file, 'image/jpeg')
             }
+            if 'cover' not in files or not files['cover']:
+                print("   🚫 ERROR CRÍTICO: files['cover'] no está definido correctamente")
+                return {
+                    "status": "error", 
+                    "message": "ERROR CRÍTICO: Estructura de archivos inválida"
+                }
             
             data = {
                 'title': article_data['title'],
@@ -950,19 +984,17 @@ REGLAS IMPORTANTES:
                 'tags': article_data['tags'],
                 'publishAs': '-1' if not article_data['publishAs'] else str(article_data['publishAs']),
                 'userId': str(self.agent_config.get('userId', 5822))
-            }            
-            headers = {
-                'Content-Type': 'multipart/form-data'
             }
             
             print(f"   - Enviando datos: {data}")
             print(f"   - Con archivo: {filename}")
-            print(f"   - Headers: {headers}")
+            print(f"   - Sin headers manuales (requests genera automáticamente)")
             
             response = requests.post(
                 self.api_endpoint,
                 files=files,
                 data=data,
+                # NO incluir headers para multipart/form-data
             )
             
             print(f"   - Response status: {response.status_code}")
@@ -970,8 +1002,19 @@ REGLAS IMPORTANTES:
             print(f"   - Response text: {response.text}")
             
             if response.status_code == 200:
-                return {"status": "success", "message": "Artículo publicado exitosamente"}
+                response_text = response.text.lower()
+                if 'sin imagen' in response_text or 'no image' in response_text or 'missing image' in response_text:
+                    print("   🚫 ADVERTENCIA: La respuesta del servidor sugiere problema con la imagen")
+                    print(f"   📝 Respuesta completa: {response.text}")
+                    return {
+                        "status": "error", 
+                        "message": f"El servidor indica problema con la imagen: {response.text}"
+                    }
+                
+                print("   ✅ Artículo publicado exitosamente CON imagen")
+                return {"status": "success", "message": "Artículo publicado exitosamente CON imagen validada"}
             else:
+                print(f"   ❌ Error del servidor: {response.status_code}")
                 return {"status": "error", "message": f"Error {response.status_code}: {response.text}"}
                 
         except Exception as e:
@@ -1578,6 +1621,93 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
             print(error_msg)
             return {"status": "error", "message": error_msg}
     
+def test_image_validation():
+    """Función de prueba para verificar que el sistema de imágenes funciona correctamente"""
+    print("🧪 Iniciando prueba de validación de imágenes...")
+    
+    agent = AutomatedTrendsAgent()
+    
+    # Simular datos de artículo de prueba
+    test_article_data = {
+        'fileName': 'test_image.jpg',
+        'title': 'Artículo de Prueba',
+        'excerpt': 'Prueba de validación de imágenes',
+        'content': '<p>Contenido de prueba</p>',
+        'category': 'Tecnología e Innovación',
+        'tags': 'prueba, test',
+        'publishAs': ''
+    }
+    
+    # Probar con imagen vacía (debería fallar)
+    print("\n1. Probando con cover_image_data = None (debería fallar):")
+    try:
+        result = agent._test_publish_validation(test_article_data, None)
+        print(f"   Resultado: {result}")
+    except Exception as e:
+        print(f"   Error: {str(e)}")
+    
+    # Probar con imagen válida simulada
+    print("\n2. Probando con imagen válida simulada:")
+    fake_image_data = b'\x89PNG\r\n\x1a\n' + b'0' * 1000  # PNG header + data
+    try:
+        result = agent._test_publish_validation(test_article_data, fake_image_data)
+        print(f"   Resultado: {result}")
+    except Exception as e:
+        print(f"   Error: {str(e)}")
+
+def _test_publish_validation(self, article_data: Dict[str, Any], cover_image_data: Optional[bytes]) -> Dict[str, Any]:
+    """Método de prueba para validar el flujo de imágenes sin hacer POST real"""
+    try:
+        # Ejecutar las mismas validaciones que publish_article pero sin POST
+        if not cover_image_data or len(cover_image_data) == 0:
+            return {
+                "status": "error", 
+                "message": "ERROR: cover_image_data está vacío"
+            }
+        
+        filename = article_data['fileName']
+        
+        try:
+            image_file = io.BytesIO(cover_image_data)
+            image_file.name = filename
+            
+            image_file.seek(0, 2)
+            size = image_file.tell()
+            image_file.seek(0)
+            
+            if size == 0:
+                return {
+                    "status": "error", 
+                    "message": "ERROR: El archivo BytesIO está vacío"
+                }
+            
+        except Exception as e:
+            return {
+                "status": "error", 
+                "message": f"ERROR creando archivo: {str(e)}"
+            }
+        
+        files = {
+            'cover': (filename, image_file, 'image/jpeg')
+        }
+        
+        if 'cover' not in files or not files['cover']:
+            return {
+                "status": "error", 
+                "message": "ERROR: Estructura de archivos inválida"
+            }
+        
+        return {
+            "status": "success", 
+            "message": f"Validación exitosa: imagen de {len(cover_image_data)} bytes"
+        }
+        
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+# Agregar método a la clase
+AutomatedTrendsAgent._test_publish_validation = _test_publish_validation
+
 def run_trends_agent(topic_position: int = None):
     """Función independiente para ejecutar el agente
     
