@@ -454,44 +454,50 @@ class AutomatedTrendsAgent:
             
             if "images" in results and len(results["images"]) > 0:
                 images_list = results["images"]
-                print(f"      {len(images_list)} imágenes encontradas, probando hasta encontrar una válida...")
+                print(f"      {len(images_list)} imágenes encontradas, tomando la primera válida...")
                 
-                max_attempts = min(10, len(images_list))
-                tested_urls = []
-                
-                for attempt in range(max_attempts):
+                # Intentar con cada imagen EN ORDEN hasta encontrar una válida
+                for img_index, image_data in enumerate(images_list):
                     try:
-                        if attempt == 0:
-                            img_index = random.randint(0, len(images_list) - 1)
-                        else:
-                            img_index = attempt % len(images_list)
+                        image_url = image_data.get("imageUrl")
                         
-                        selected_image_data = images_list[img_index]
-                        image_url = selected_image_data.get("imageUrl")
-                        
-                        if not image_url or image_url in tested_urls:
+                        if not image_url:
+                            print(f"      ❌ Imagen #{img_index + 1}: Sin URL")
                             continue
-                            
-                        tested_urls.append(image_url)
                         
-                        if self._is_valid_image_url(image_url):
-                            title = selected_image_data.get("title", "N/A")
-                            source = selected_image_data.get("source", "N/A")
+                        # Validación básica de URL (más permisiva)
+                        if not (image_url.startswith('http://') or image_url.startswith('https://')):
+                            print(f"      ❌ Imagen #{img_index + 1}: URL inválida")
+                            continue
+                        
+                        # Verificar extensión - aceptar jpg, png, webp, gif
+                        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']
+                        has_valid_extension = any(image_url.lower().endswith(ext) for ext in valid_extensions)
+                        
+                        # O verificar indicadores de imagen en la URL
+                        image_indicators = ['images', 'img', 'photo', 'pic', 'thumb', 'avatar', 'logo']
+                        has_image_indicator = any(indicator in image_url.lower() for indicator in image_indicators)
+                        
+                        if has_valid_extension or has_image_indicator:
+                            title = image_data.get("title", "N/A")
+                            source = image_data.get("source", "N/A")
                             
-                            print(f"      ✅ Imagen #{attempt + 1} seleccionada (índice {img_index + 1}/{len(images_list)}):")
+                            print(f"      ✅ PRIMERA imagen válida encontrada (#{img_index + 1}/{len(images_list)}):")
                             print(f"         - Título: {title[:50]}...")
                             print(f"         - Fuente: {source}")
                             print(f"         - URL: {image_url}")
+                            print(f"         - Extensión válida: {has_valid_extension}")
+                            print(f"         - Indicador válido: {has_image_indicator}")
                             
                             return image_url
                         else:
-                            print(f"      ❌ Imagen #{attempt + 1} inválida: {image_url}")
+                            print(f"      ❌ Imagen #{img_index + 1}: No tiene extensión válida ni indicadores de imagen")
                             
                     except Exception as e:
-                        print(f"      ❌ Error procesando imagen #{attempt + 1}: {str(e)}")
+                        print(f"      ❌ Error procesando imagen #{img_index + 1}: {str(e)}")
                         continue
                 
-                print(f"      ❌ Ninguna de las {max_attempts} imágenes probadas fue válida")
+                print(f"      ❌ Ninguna de las {len(images_list)} imágenes fue válida")
             else:
                 print("      ❌ No se encontraron imágenes en la respuesta")
             
@@ -533,33 +539,48 @@ class AutomatedTrendsAgent:
         return converted
     
     def _is_valid_image_url(self, url: str) -> bool:
-        """Verifica si la URL de imagen es válida con criterios más permisivos"""
+        """Verifica si la URL de imagen es válida - VERSIÓN MUY PERMISIVA"""
         if not url or len(url) < 10:
             return False
         
+        # URLs claramente inválidas
         blocked_domains = ['data:', 'javascript:', 'blob:', 'chrome-extension:', 'about:', 'file:']
         if any(url.lower().startswith(blocked) for blocked in blocked_domains):
             return False
         
+        # Debe ser una URL HTTP/HTTPS válida
         if not (url.lower().startswith('http://') or url.lower().startswith('https://')):
             return False
         
-        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg']
+        # NUEVA LÓGICA: Aceptar prácticamente cualquier URL que parezca imagen
+        # Extensiones de imagen válidas (muy amplio)
+        valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg', '.tiff', '.ico']
         has_valid_extension = any(url.lower().endswith(ext) for ext in valid_extensions)
         
-        image_indicators = ['images', 'img', 'photo', 'pic', 'thumb', 'avatar', 'logo', 'banner']
+        # Indicadores de imagen en la URL (muy amplio)
+        image_indicators = ['images', 'img', 'photo', 'pic', 'thumb', 'avatar', 'logo', 'banner', 
+                           'media', 'upload', 'content', 'static', 'assets', 'file']
         has_image_indicator = any(indicator in url.lower() for indicator in image_indicators)
         
+        # Dominios de imágenes conocidos (muy amplio)
         image_domains = ['imgur.com', 'flickr.com', 'cloudinary.com', 'amazonaws.com', 'googleusercontent.com', 
-                        'fbcdn.net', 'cdninstagram.com', 'pinimg.com', 'wikimedia.org', 'unsplash.com']
+                        'fbcdn.net', 'cdninstagram.com', 'pinimg.com', 'wikimedia.org', 'unsplash.com',
+                        'pexels.com', 'shutterstock.com', 'getty', 'adobe.com', 'istock']
         has_image_domain = any(domain in url.lower() for domain in image_domains)
         
+        # NUEVA LÓGICA: Si tiene extensión válida, indicador O dominio conocido, es válida
         if has_valid_extension or has_image_indicator or has_image_domain:
             return True
         
+        # NUEVA LÓGICA: Si no tiene nada obvio pero es una URL corta y simple, probablemente es válida
+        if len(url) <= 200 and not any(suspicious in url.lower() for suspicious in ['javascript', 'data', 'void', 'null']):
+            return True
+        
+        # Rechazar URLs muy largas (probablemente no son imágenes directas)
         if len(url) > 500:
             return False
             
+        # Por defecto, aceptar (ser muy permisivo)
         return True
     
     def download_image_from_url(self, url: str) -> Optional[bytes]:
@@ -579,41 +600,46 @@ class AutomatedTrendsAgent:
             response = requests.get(url, headers=headers, timeout=30, stream=True)
             response.raise_for_status()
             
+            # NUEVA LÓGICA: Ser MUCHO más permisivo con el content-type
             content_type = response.headers.get('content-type', '').lower()
-            valid_content_types = ['image/', 'jpeg', 'jpg', 'png', 'webp', 'gif', 'bmp']
+            print(f"      📋 Tipo de contenido: {content_type}")
             
-            if not any(img_type in content_type for img_type in valid_content_types):
-                print(f"      ⚠️ Tipo de contenido no típico: {content_type} - Intentando descargar de todos modos")
+            # NO rechazar por content-type, solo informar
+            # (Muchas imágenes válidas tienen content-types raros)
             
             image_data = response.content
             
-            if len(image_data) < 500: 
+            # NUEVA LÓGICA: Validaciones de tamaño más flexibles
+            if len(image_data) < 100:  # Reducir aún más el mínimo
                 print(f"      ❌ Imagen muy pequeña: {len(image_data)} bytes")
                 return None
                 
-            if len(image_data) > 10 * 1024 * 1024:
+            if len(image_data) > 15 * 1024 * 1024:  # Aumentar máximo a 15MB
                 print(f"      ❌ Imagen muy grande: {len(image_data)} bytes")
                 return None
             
+            # NUEVA LÓGICA: Siempre aceptar la imagen sin verificación PIL obligatoria
+            print(f"      ✅ Imagen descargada exitosamente: {len(image_data)} bytes")
+            
+            # Intentar validar con PIL si está disponible (pero no es obligatorio)
             try:
                 from PIL import Image
                 img_obj = Image.open(io.BytesIO(image_data))
                 img_obj.verify()
                 
+                # Si PIL funciona, verificar dimensiones
                 width, height = img_obj.size
-                if width < 100 or height < 100:
-                    print(f"      ❌ Imagen muy pequeña: {width}x{height} pixels")
-                    return None
+                if width < 50 or height < 50:  # Reducir mínimo de dimensiones
+                    print(f"      ⚠️ Imagen pequeña: {width}x{height} pixels - Pero la aceptamos de todos modos")
                     
-                print(f"      ✅ Imagen válida: {len(image_data)} bytes, {width}x{height} pixels")
-                return image_data
+                print(f"      ✅ Verificación PIL exitosa: {width}x{height} pixels")
                 
             except ImportError:
-                print(f"      ✅ Imagen descargada (sin verificación PIL): {len(image_data)} bytes")
-                return image_data
+                print(f"      ℹ️ PIL no disponible - Aceptando imagen sin verificación")
             except Exception as e:
-                print(f"      ⚠️ Error verificando imagen con PIL: {str(e)} - Usando imagen de todos modos")
-                return image_data
+                print(f"      ⚠️ PIL falló: {str(e)} - Pero aceptamos la imagen de todos modos")
+            
+            return image_data
                 
         except requests.exceptions.Timeout:
             print(f"      ❌ Timeout descargando imagen")
