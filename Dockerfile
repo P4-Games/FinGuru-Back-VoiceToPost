@@ -2,13 +2,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY app app
 COPY requirements.txt requirements.txt
-
-# Copiamos tanto .env como .env.local si existen
-COPY .env* ./
-
 RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app app
+
+# Copia los archivos .env solo si existen, sin causar un error si no están.
+COPY --chown=nonroot:nonroot .env* ./
 
 EXPOSE 8080
 
