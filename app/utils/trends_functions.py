@@ -10,7 +10,7 @@ class TrendsAPI:
         self.api_key2 = os.getenv("SERPAPI_KEY2")
         self.current_key_index = 0 
 
-    def get_trending_searches_by_category(self, geo='AR', hours=24, language="es-419", no_cache=False, count=10):
+    def get_trending_searches_by_category(self, geo='AR', hours=24, language="es-419", no_cache=False, count=16):
         """
         Obtiene las tendencias de búsqueda usando SerpAPI con sistema de fallback.
         
