@@ -25,7 +25,7 @@ class SearchAPI:
         """Obtiene temas trending usando TrendsAPI"""
         try:
             print("Obteniendo trending topics usando TrendsAPI...")
-            return self.trends_api.get_trending_topics()
+            return self.trends_api.get_trending_searches_by_category()
         except Exception as e:
             print(f"Error obteniendo trending topics: {str(e)}")
             return {"status": "error", "message": str(e)}
