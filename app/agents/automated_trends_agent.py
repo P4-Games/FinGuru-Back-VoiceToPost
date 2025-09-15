@@ -258,6 +258,125 @@ class AutomatedTrendsAgent:
                 "message": f"Error publicando artículo sin imagen: {str(e)}"
             }
 
+    def run_news_guaranteed_process(self, topic_position: int = None, allow_no_image: bool = False) -> Dict[str, Any]:
+        """Ejecuta el proceso automatizado garantizando que se obtenga una noticia"""
+        try:
+            print(f"🚀 Iniciando proceso GARANTIZADO CON NOTICIA para agente: {self.agent_name}")
+            
+            # 1. Obtener tendencias
+            trends_data = self.get_trending_topics()
+            if trends_data.get("status") != "success":
+                return {"status": "error", "message": "No se pudieron obtener tendencias"}
+            
+            # 2. Seleccionar tendencia
+            trending_searches = trends_data.get("trending_searches_argentina", [])
+            if not trending_searches:
+                return {"status": "error", "message": "No hay tendencias disponibles"}
+            
+            if topic_position and 1 <= topic_position <= len(trending_searches):
+                selected_trend = trending_searches[topic_position - 1]
+                trend_title = selected_trend.get("title", "")
+                print(f"🎯 Usando posición específica {topic_position}: {trend_title}")
+            else:
+                # Selección automática (podríamos usar GPT aquí)
+                selected_trend = trending_searches[0]  # Por simplicidad, usar el primero
+                trend_title = selected_trend.get("title", "")
+                topic_position = 1
+                print(f"🎯 Selección automática: #{topic_position} - {trend_title}")
+            
+            # 3. Verificar similitud con artículos recientes
+            recent_articles = self.article_manager.get_agent_recent_articles(
+                self.agent_config.get('userId', 5822)
+            )
+            
+            if recent_articles.get("status") == "success":
+                articles = recent_articles.get("articles", [])
+                similarity_check = self.article_manager.check_article_similarity(trend_title, articles)
+                
+                if similarity_check.get("is_similar"):
+                    print("⚠️ Tema similar ya fue cubierto recientemente")
+                    return {
+                        "status": "skipped",
+                        "message": f"Tema '{trend_title}' ya fue cubierto recientemente",
+                        "similar_article": similarity_check.get("message", "")
+                    }
+            
+            # 4. 🔥 GARANTIZAR OBTENCIÓN DE NOTICIAS 🔥
+            print("📰 GARANTIZANDO OBTENCIÓN DE NOTICIAS...")
+            search_results = self.search_api.search_guaranteed_news(trend_title, max_attempts=8)
+            
+            if search_results.get("status") != "success":
+                print(f"❌ CRÍTICO: No se pudieron obtener noticias después de múltiples intentos")
+                return {
+                    "status": "error",
+                    "message": f"No se pudieron obtener noticias para '{trend_title}' después de múltiples estrategias",
+                    "details": search_results.get("message", "")
+                }
+            
+            # Validar que tenemos noticias reales
+            news_results = search_results.get("results", {}).get("news", [])
+            if not news_results or len(news_results) == 0:
+                return {
+                    "status": "error", 
+                    "message": "No se obtuvieron noticias válidas después de búsqueda garantizada"
+                }
+            
+            print(f"✅ NOTICIAS OBTENIDAS: {len(news_results)} noticias válidas")
+            print(f"   Query utilizada: '{search_results.get('query_used', 'N/A')}'")
+            print(f"   Tipo de búsqueda: {search_results.get('query_type', 'N/A')}")
+            
+            # Mostrar las primeras 3 noticias encontradas
+            for i, news in enumerate(news_results[:3], 1):
+                title = news.get("title", "Sin título")[:60]
+                print(f"   📰 {i}. {title}...")
+            
+            # 5. Crear prompt y generar contenido
+            prompt = self.content_processor.create_prompt(
+                trends_data, search_results.get("results", {}), trend_title, topic_position, self.agent_config
+            )
+            
+            agent_response = self.content_processor.generate_article_content(prompt)
+            
+            # 6. Procesar datos del artículo
+            article_result = self.content_processor.process_article_data(agent_response)
+            if article_result.get("status") != "success":
+                return article_result
+            
+            article_data = article_result["data"]
+            
+            # 7. Validar contenido generado
+            validation_result = self.content_processor.validate_generated_content(article_data)
+            if validation_result.get("status") != "success":
+                return validation_result
+            
+            # 8. Publicar artículo
+            publish_result = self.publish_article(
+                article_data, 
+                trend_title, 
+                search_results.get("results", {}), 
+                allow_no_image=allow_no_image
+            )
+            
+            return {
+                "status": publish_result.get("status"),
+                "message": publish_result.get("message"),
+                "article_data": article_data,
+                "trend_title": trend_title,
+                "trend_position": topic_position,
+                "news_guaranteed": True,
+                "news_count": len(news_results),
+                "news_query_used": search_results.get('query_used', 'N/A'),
+                "news_search_type": search_results.get('query_type', 'N/A'),
+                "publish_result": publish_result,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            error_msg = f"Error en proceso garantizado con noticias: {str(e)}"
+            print(f"❌ {error_msg}")
+            traceback.print_exc()
+            return {"status": "error", "message": error_msg}
+
     def run_automated_process(self, topic_position: int = None) -> Dict[str, Any]:
         """Ejecuta el proceso automatizado completo para un solo agente"""
         try:
@@ -429,6 +548,12 @@ def run_trends_agent(topic_position: int = None):
     """Función independiente para ejecutar el agente"""
     agent = AutomatedTrendsAgent()
     return agent.run_automated_process(topic_position)
+
+
+def run_trends_agent_with_guaranteed_news(topic_position: int = None, allow_no_image: bool = False):
+    """Función independiente para ejecutar el agente GARANTIZANDO noticias"""
+    agent = AutomatedTrendsAgent()
+    return agent.run_news_guaranteed_process(topic_position, allow_no_image)
 
 
 def run_multi_trends_agents(topic_position: int = None):

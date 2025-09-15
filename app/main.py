@@ -10,7 +10,7 @@ from load_env import load_env_files
 from utils.middleware import check_subscription, check_sudo_api_key
 from typing import Optional
 from utils.trends_functions import TrendsAPI
-from agents.automated_trends_agent import run_trends_agent, run_multi_trends_agents
+from agents.automated_trends_agent import run_trends_agent, run_multi_trends_agents, run_trends_agent_with_guaranteed_news
 from datetime import datetime
 
 load_env_files()
@@ -341,3 +341,106 @@ async def test_execute_multi_trends_agents(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error ejecutando test multi-agentes: {str(e)}")
 
+
+@app.post("/run_trends_agent_guaranteed_news")
+async def execute_trends_agent_guaranteed_news(
+    topic_position: Optional[int] = None,
+    allow_no_image: Optional[bool] = False,
+    sudo_check: dict = Depends(check_sudo_api_key)
+):
+    """
+    🔥 Ejecuta el agente automatizado GARANTIZANDO la obtención de noticias.
+    
+    Esta función es similar a /run_trends_agent pero con garantías mejoradas:
+    1. Obtiene las tendencias actuales
+    2. 🚨 GARANTIZA obtener noticias (hasta 8 intentos con diferentes estrategias)
+    3. Valida que las noticias tengan contenido suficiente
+    4. Genera un artículo completo usando ChatGPT
+    5. Publica el artículo automáticamente en fin.guru
+    
+    Headers requeridos:
+        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
+        
+    Args:
+        topic_position: Posición específica de tendencia (1-10) o None para auto-selección
+        allow_no_image: Si se permite publicar sin imagen como último recurso
+        sudo_check: Verificación de SUDO_API_KEY (inyectada automáticamente)
+        
+    Returns:
+        dict: Resultado del proceso con información de noticias garantizadas
+        {
+            "status": "success|error",
+            "message": "Mensaje descriptivo",
+            "trend_title": "Título de la tendencia usada",
+            "news_guaranteed": true,
+            "news_count": 5,
+            "news_query_used": "Query que funcionó para obtener noticias",
+            "news_search_type": "Tipo de búsqueda exitosa",
+            "article_data": {...},
+            "publish_result": {...},
+            "timestamp": "2025-09-15T..."
+        }
+    """
+    try:
+        result = run_trends_agent_with_guaranteed_news(
+            topic_position=topic_position, 
+            allow_no_image=allow_no_image
+        )
+        
+        # Agregar información adicional para el endpoint
+        if isinstance(result, dict):
+            result["endpoint"] = "/run_trends_agent_guaranteed_news"
+            result["guaranteed_news_feature"] = True
+            
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error ejecutando agente con noticias garantizadas: {str(e)}")
+
+
+@app.get("/test_guaranteed_news")
+async def test_guaranteed_news_endpoint(
+    topic_position: Optional[int] = None,
+    allow_no_image: Optional[bool] = False
+):
+    """
+    🧪 [TESTING] Endpoint GET simple para probar noticias garantizadas sin autenticación SUDO.
+    
+    Esta es una versión simplificada de /run_trends_agent_guaranteed_news para testing:
+    - No requiere headers especiales ni autenticación SUDO
+    - Útil para desarrollo y testing rápido
+    - Ejecuta el proceso completo con noticias garantizadas
+    
+    Args:
+        topic_position: Posición específica de tendencia (1-10) o None para auto-selección
+        allow_no_image: Si se permite publicar sin imagen como último recurso
+        
+    Returns:
+        dict: Resultado del proceso con información detallada de noticias
+    
+    Ejemplo de uso:
+        GET /test_guaranteed_news?topic_position=1&allow_no_image=false
+    """
+    try:
+        print(f"🧪 [TEST] Ejecutando agente con noticias garantizadas...")
+        print(f"   Topic position: {topic_position}")
+        print(f"   Allow no image: {allow_no_image}")
+        
+        result = run_trends_agent_with_guaranteed_news(
+            topic_position=topic_position, 
+            allow_no_image=allow_no_image
+        )
+        
+        # Agregar información de testing
+        if isinstance(result, dict):
+            result["endpoint"] = "/test_guaranteed_news"
+            result["test_mode"] = True
+            result["guaranteed_news_feature"] = True
+            result["timestamp_request"] = datetime.now().isoformat()
+            
+        print(f"🧪 [TEST] Resultado: {result.get('status', 'unknown')}")
+        
+        return result
+    except Exception as e:
+        error_detail = f"Error en test de agente con noticias garantizadas: {str(e)}"
+        print(f"❌ [TEST] {error_detail}")
+        raise HTTPException(status_code=500, detail=error_detail)

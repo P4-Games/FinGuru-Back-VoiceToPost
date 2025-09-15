@@ -308,6 +308,113 @@ class SearchAPI:
         
         return queries
 
+    def search_guaranteed_news(self, trend_title: str, max_attempts: int = 5) -> Dict[str, Any]:
+        """Garantiza la obtención de noticias probando múltiples estrategias"""
+        try:
+            print(f"📰 BÚSQUEDA GARANTIZADA DE NOTICIAS para: '{trend_title}'")
+            
+            # Generar múltiples consultas de búsqueda
+            search_queries = self._generate_news_search_queries(trend_title)
+            
+            for attempt_num, (query_type, query) in enumerate(search_queries, 1):
+                if attempt_num > max_attempts:
+                    break
+                    
+                try:
+                    print(f"   🔍 Intento {attempt_num}/{max_attempts}: {query_type} - '{query}'")
+                    
+                    search_result = self.search_google_news(query)
+                    
+                    if search_result.get("status") == "success":
+                        results = search_result.get("results", {})
+                        news_results = results.get("news", [])
+                        
+                        if news_results and len(news_results) > 0:
+                            print(f"   ✅ ¡ÉXITO! {len(news_results)} noticias encontradas con '{query}'")
+                            
+                            # Validar que las noticias tienen contenido mínimo
+                            valid_news = []
+                            for news in news_results:
+                                title = news.get("title", "").strip()
+                                snippet = news.get("snippet", "").strip()
+                                
+                                if title and len(title) > 10 and snippet and len(snippet) > 20:
+                                    valid_news.append(news)
+                            
+                            if valid_news:
+                                print(f"   ✅ {len(valid_news)} noticias validadas con contenido suficiente")
+                                # Actualizar los resultados con solo las noticias válidas
+                                results["news"] = valid_news
+                                return {
+                                    "status": "success",
+                                    "results": results,
+                                    "query_used": query,
+                                    "query_type": query_type,
+                                    "attempt_number": attempt_num,
+                                    "total_news": len(valid_news)
+                                }
+                            else:
+                                print(f"   ⚠️ Noticias encontradas pero sin contenido suficiente")
+                        else:
+                            print(f"   ❌ No se encontraron noticias en intento {attempt_num}")
+                    else:
+                        print(f"   ❌ Error en búsqueda: {search_result.get('message', 'Error desconocido')}")
+                        
+                except Exception as e:
+                    print(f"   ❌ Error en intento {attempt_num}: {str(e)}")
+                    continue
+            
+            # Si llegamos aquí, no se encontraron noticias
+            return {
+                "status": "error",
+                "message": f"No se pudieron obtener noticias después de {max_attempts} intentos con diferentes estrategias",
+                "attempts_made": max_attempts
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error en búsqueda garantizada de noticias: {str(e)}"
+            }
+
+    def _generate_news_search_queries(self, trend_title: str) -> List[tuple]:
+        """Genera múltiples consultas estratégicas para búsqueda de noticias"""
+        queries = []
+        
+        # 1. Consulta exacta
+        queries.append(("exact", trend_title))
+        
+        # 2. Consulta con contexto argentino
+        queries.append(("argentina_context", f"{trend_title} Argentina"))
+        
+        # 3. Consulta con "noticias" explícito
+        queries.append(("with_noticias", f"noticias {trend_title}"))
+        
+        # 4. Consulta simplificada (palabras clave principales)
+        words = trend_title.split()
+        main_keywords = [word for word in words if len(word) > 3][:2]
+        if main_keywords:
+            queries.append(("simplified", " ".join(main_keywords)))
+        
+        # 5. Consulta por categoría temática
+        trend_lower = trend_title.lower()
+        if any(word in trend_lower for word in ['gobierno', 'política', 'político', 'ministro', 'presidente']):
+            queries.append(("category", "política Argentina gobierno"))
+        elif any(word in trend_lower for word in ['fútbol', 'boca', 'river', 'deporte', 'copa']):
+            queries.append(("category", "deportes fútbol Argentina"))
+        elif any(word in trend_lower for word in ['económico', 'economía', 'dólar', 'inflación', 'mercado']):
+            queries.append(("category", "economía Argentina financiero"))
+        elif any(word in trend_lower for word in ['artista', 'actor', 'cantante', 'famoso', 'celebridad']):
+            queries.append(("category", "entretenimiento famosos Argentina"))
+        else:
+            # Consulta genérica para otros temas
+            queries.append(("generic", "actualidad Argentina noticias"))
+        
+        # 6. Consulta ultra-genérica de último recurso
+        queries.append(("fallback", "noticias Argentina hoy"))
+        
+        return queries
+
     def search_image_with_multiple_queries(self, trend_title: str) -> Optional[bytes]:
         """Busca imágenes usando múltiples estrategias de búsqueda"""
         search_queries = self.generate_search_queries(trend_title)
