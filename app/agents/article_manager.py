@@ -16,83 +16,52 @@ class ArticleManager:
         self.sudo_api_key = sudo_api_key or os.getenv("SUDO_API_KEY")
     
     def get_agent_recent_articles(self, user_id: int) -> Dict[str, Any]:
-        """Obtiene artículos recientes de un agente específico"""
+        """Obtiene los últimos 2 artículos del agente para evitar repetir temas"""
         try:
-            print(f"Obteniendo artículos recientes para userId: {user_id}")
+            print(f"Obteniendo últimos artículos del agente (User ID: {user_id})...")
             
-            endpoint = f"{self.next_public_api_url}/articles"
+            endpoint = f"https://backend.fin.guru/api/articles?filters[author][id][$eq]={user_id}&sort=createdAt:desc&pagination[limit]=2&fields[0]=title&fields[1]=excerpt&populate=category"
             
             headers = {
-                "Authorization": f"Bearer {self.sudo_api_key}",
                 "Content-Type": "application/json",
             }
             
-            params = {
-                "populate": "*",
-                "filters[userId]": user_id,
-                "sort": "createdAt:desc",
-                "pagination[limit]": 5
-            }
-            
-            response = requests.get(endpoint, headers=headers, params=params)
+            response = requests.get(endpoint, headers=headers)
             
             if not response.ok:
-                raise Exception(f"HTTP error! status: {response.status_code}")
+                print(f"Error obteniendo artículos del agente: HTTP {response.status_code}")
+                return {"status": "error", "message": f"HTTP error: {response.status_code}", "articles": []}
             
             data = response.json()
+            articles = []
             
-            if 'data' in data:
-                articles = data['data']
-            else:
-                articles = data.get('details', [])
-            
-            if not articles:
-                return {"status": "success", "articles": [], "count": 0}
-            
-            # Filtrar artículos de las últimas 24 horas
-            cutoff_date = datetime.now() - timedelta(hours=24)
-            recent_articles = []
-            
-            for article in articles:
-                try:
-                    created_at_str = article.get('createdAt', '')
-                    if created_at_str:
-                        # Parsear diferentes formatos de fecha
-                        try:
-                            if '.' in created_at_str:
-                                # Formato con microsegundos
-                                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                            else:
-                                # Formato estándar
-                                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                        except:
-                            # Fallback para otros formatos
-                            created_at = datetime.strptime(created_at_str[:19], '%Y-%m-%dT%H:%M:%S')
+            if 'data' in data and isinstance(data['data'], list):
+                for article in data['data']:
+                    if isinstance(article, dict) and 'attributes' in article:
+                        attr = article['attributes']
                         
-                        # Si el artículo es de las últimas 24 horas, incluirlo
-                        if created_at.replace(tzinfo=None) >= cutoff_date:
-                            recent_articles.append({
-                                'id': article.get('id'),
-                                'title': article.get('title', ''),
-                                'excerpt': article.get('excerpt', ''),
-                                'category': article.get('category', ''),
-                                'tags': article.get('tags', ''),
-                                'createdAt': created_at_str,
-                                'userId': user_id
-                            })
-                except Exception as date_error:
-                    print(f"   Error procesando fecha para artículo {article.get('id')}: {str(date_error)}")
-                    continue
+                        category_name = ""
+                        category_data = attr.get('category', {})
+                        if isinstance(category_data, dict) and 'data' in category_data:
+                            category_attrs = category_data.get('data', {}).get('attributes', {})
+                            category_name = category_attrs.get('name', '')
+                        
+                        articles.append({
+                            'id': article.get('id'),
+                            'title': attr.get('title', ''),
+                            'excerpt': attr.get('excerpt', ''),
+                            'category': category_name,
+                            'createdAt': attr.get('createdAt', '')
+                        })
             
-            print(f"   Artículos recientes encontrados: {len(recent_articles)}")
-            for article in recent_articles:
-                title = article.get('title', 'Sin título')[:50]
-                print(f"      - {title}...")
+            print(f"Se encontraron {len(articles)} artículos recientes")
+            for i, article in enumerate(articles):
+                print(f"   {i+1}. {article.get('title', 'Sin título')} (ID: {article.get('id')}) - Categoría: {article.get('category', 'N/A')}")
             
             return {
                 "status": "success",
-                "articles": recent_articles,
-                "count": len(recent_articles)
+                "articles": articles,
+                "total": len(articles)
             }
             
         except Exception as e:
@@ -247,7 +216,8 @@ class ArticleManager:
             return {
                 'status': 'error',
                 'message': str(e),
-                'details': [],'total': 0
+                'details': [],
+                'total': 0
             }
 
     def validate_article_data(self, article_data: Dict[str, Any]) -> Dict[str, Any]:
