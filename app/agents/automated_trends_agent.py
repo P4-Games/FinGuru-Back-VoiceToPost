@@ -98,8 +98,8 @@ class AutomatedTrendsAgent:
         return result
 
     def publish_article(self, article_data: Dict[str, Any], trend_title: str, 
-                       search_results: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Publica un artículo con imagen"""
+                       search_results: Dict[str, Any] = None, allow_no_image: bool = False) -> Dict[str, Any]:
+        """Publica un artículo con imagen o sin ella como fallback de emergencia"""
         try:
             print(f"📤 Iniciando publicación del artículo: '{article_data['title']}'")
             
@@ -108,15 +108,41 @@ class AutomatedTrendsAgent:
             if validation_result.get("status") != "success":
                 return validation_result
             
-            # Buscar y descargar imagen
-            print("🔍 Buscando imagen para el artículo...")
-            cover_image_data = self.search_api.search_image_with_multiple_queries(trend_title)
+            # Buscar imagen con reintentos
+            cover_image_data = None
+            max_retries = 3
             
-            if not cover_image_data:
-                return {
-                    "status": "error",
-                    "message": "No se pudo obtener imagen para el artículo"
-                }
+            for attempt in range(max_retries):
+                print(f"🔍 Buscando imagen para el artículo... (intento {attempt + 1}/{max_retries})")
+                try:
+                    cover_image_data = self.search_api.search_image_with_multiple_queries(trend_title)
+                    
+                    if cover_image_data and len(cover_image_data) > 0:
+                        print(f"✅ Imagen encontrada exitosamente ({len(cover_image_data)} bytes)")
+                        break
+                    else:
+                        print(f"⚠️ No se obtuvo imagen válida en intento {attempt + 1}")
+                        
+                except Exception as e:
+                    print(f"❌ Error en búsqueda de imagen (intento {attempt + 1}): {str(e)}")
+                    
+                if attempt < max_retries - 1:
+                    import time
+                    print(f"⏳ Esperando 2 segundos antes del siguiente intento...")
+                    time.sleep(2)
+            
+            # Si no se encuentra imagen después de todos los intentos
+            if not cover_image_data or len(cover_image_data) == 0:
+                print(f"❌ No se pudo obtener imagen después de {max_retries} intentos")
+                
+                if allow_no_image:
+                    print("🚨 Publicando sin imagen como último recurso...")
+                    return self.publish_article_without_image(article_data)
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"No se pudo obtener imagen para el artículo después de {max_retries} intentos"
+                    }
             
             # Preparar datos para la API
             format_result = self.article_manager.format_article_for_api(
@@ -185,6 +211,53 @@ class AutomatedTrendsAgent:
                 "message": f"Error publicando artículo: {str(e)}"
             }
 
+    def publish_article_without_image(self, article_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Publica un artículo sin imagen como fallback de emergencia"""
+        try:
+            print("🚨 FALLBACK: Publicando artículo SIN imagen")
+            
+            # Preparar datos para la API
+            format_result = self.article_manager.format_article_for_api(
+                article_data, 
+                self.agent_config.get('userId', 5822)
+            )
+            
+            if format_result.get("status") != "success":
+                return format_result
+            
+            formatted_data = format_result["data"]
+            
+            print("📤 Enviando artículo SIN imagen al servidor")
+            
+            # Realizar petición POST sin archivos
+            response = requests.post(
+                self.api_endpoint,
+                data=formatted_data
+            )
+            
+            print(f"📡 Response status: {response.status_code}")
+            
+            if response.status_code == 200:
+                print("⚠️ Artículo publicado exitosamente SIN imagen (fallback)")
+                return {
+                    "status": "success",
+                    "message": "Artículo publicado exitosamente SIN imagen (fallback de emergencia)",
+                    "response": response.text,
+                    "article_title": article_data['title'],
+                    "warning": "Publicado sin imagen por fallo en búsqueda"
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Error del servidor al publicar sin imagen: {response.status_code} - {response.text}"
+                }
+                
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error publicando artículo sin imagen: {str(e)}"
+            }
+
     def run_automated_process(self, topic_position: int = None) -> Dict[str, Any]:
         """Ejecuta el proceso automatizado completo para un solo agente"""
         try:
@@ -250,8 +323,8 @@ class AutomatedTrendsAgent:
             if validation_result.get("status") != "success":
                 return validation_result
             
-            # 8. Publicar artículo
-            publish_result = self.publish_article(article_data, trend_title, search_results)
+            # 8. Publicar artículo (sin fallback sin imagen por defecto)
+            publish_result = self.publish_article(article_data, trend_title, search_results, allow_no_image=False)
             
             return {
                 "status": publish_result.get("status"),
@@ -294,7 +367,7 @@ class AutomatedTrendsAgent:
                 """Callback para publicar artículos de cada agente"""
                 # Crear instancia temporal con configuración del agente
                 temp_agent = AutomatedTrendsAgent(agent_config)
-                return temp_agent.publish_article(article_data, trend_title, search_results)
+                return temp_agent.publish_article(article_data, trend_title, search_results, allow_no_image=False)
             
             results = self.agent_manager.coordinate_multi_agent_publishing(
                 assignments, 
