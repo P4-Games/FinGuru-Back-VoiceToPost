@@ -206,42 +206,49 @@ class ArticleManager:
                 agents = data['details']
             else:
                 agents = data.get('data', [])
-                if isinstance(agents, list) and agents:
-                    # Transformar estructura si es necesario
-                    transformed_agents = []
+                if isinstance(agents, list) and agents:                    
+                    processed_agents = []
                     for agent in agents:
                         if isinstance(agent, dict):
-                            agent_data = agent
-                            if 'attributes' in agent:
-                                # Formato Strapi
-                                attrs = agent['attributes']
-                                agent_data = {
-                                    'id': agent.get('id'),
-                                    'name': attrs.get('name'),
-                                    'userId': attrs.get('userId'),
-                                    'personality': attrs.get('personality'),
-                                    'trending': attrs.get('trending'),
-                                    'format_markdown': attrs.get('format_markdown')
-                                }
-                            transformed_agents.append(agent_data)
-                    agents = transformed_agents
+                            # Extraer userId del usuario poblado
+                            user_id = None
+                            user_data = agent.get('attributes', {}).get('user', {})
+                            if isinstance(user_data, dict) and 'data' in user_data:
+                                user_id = user_data.get('data', {}).get('id')
+                            elif isinstance(user_data, dict) and 'id' in user_data:
+                                user_id = user_data.get('id')
+                            
+                            processed_agent = {
+                                'id': agent.get('id'),
+                                'name': agent.get('attributes', {}).get('name', f"agent-{agent.get('id')}"),
+                                'personality': agent.get('attributes', {}).get('personality', ''),
+                                'trending': agent.get('attributes', {}).get('trending', ''),
+                                'format_markdown': agent.get('attributes', {}).get('format_markdown', ''),
+                                'userId': user_id,
+                                'createdAt': agent.get('attributes', {}).get('createdAt', ''),
+                                'updatedAt': agent.get('attributes', {}).get('updatedAt', ''),
+                                'publishedAt': agent.get('attributes', {}).get('publishedAt', '')
+                            }
+                            processed_agents.append(processed_agent)
+                    agents = processed_agents
             
-            if not isinstance(agents, list):
-                agents = []
-            
-            print(f"Agentes encontrados: {len(agents)}")
+            print(f"Se encontraron {len(agents)} agentes disponibles")
             for agent in agents:
-                name = agent.get('name', 'Sin nombre')
-                agent_id = agent.get('id', 'N/A')
-                user_id = agent.get('userId', 'N/A')
-                print(f"   - {name} (ID: {agent_id}, UserID: {user_id})")
+                print(f"   - ID: {agent.get('id')}, Nombre: {agent.get('name')}")
             
-            return {"status": "success", "details": agents, "count": len(agents)}
+            return {
+                'status': 'success',
+                'details': agents,
+                'total': len(agents)
+            }
             
         except Exception as e:
-            error_msg = f"Error obteniendo agentes disponibles: {str(e)}"
-            print(error_msg)
-            return {"status": "error", "message": error_msg, "details": []}
+            print(f"Error obteniendo agentes desde la API: {str(e)}")
+            return {
+                'status': 'error',
+                'message': str(e),
+                'details': [],'total': 0
+            }
 
     def validate_article_data(self, article_data: Dict[str, Any]) -> Dict[str, Any]:
         """Valida los datos de un artículo antes de publicar"""
