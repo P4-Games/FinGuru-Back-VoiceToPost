@@ -39,7 +39,7 @@ Estás analizando las siguientes tendencias actuales de Argentina:
             
             # Agregar tendencias
             if trends_data.get("status") == "success":
-                trending_searches = trends_data.get("trending_searches_argentina", [])
+                trending_searches = trends_data.get("trending_topics", [])
                 if trending_searches:
                     for i, trend in enumerate(trending_searches[:10], 1):
                         trend_title = trend.get("title", "Sin título")
@@ -145,12 +145,29 @@ Estás analizando las siguientes tendencias actuales de Argentina:
 """
             
             prompt += """
-## IMPORTANTE:
-- Responde ÚNICAMENTE con el JSON solicitado
-- NO agregues explicaciones adicionales
-- El contenido debe estar en español
+## IMPORTANTE - LEE ESTO CUIDADOSAMENTE:
+- Responde ÚNICAMENTE con el JSON solicitado usando los nombres de campos EXACTOS
+- OBLIGATORIO: Usa "title" NO "titulo"
+- OBLIGATORIO: Usa "excerpt" NO "extracto" 
+- OBLIGATORIO: Usa "content" NO "contenido"
+- OBLIGATORIO: Usa "category" NO "categoria"
+- OBLIGATORIO: Usa "tags" NO "etiquetas"
+- El campo "content" debe ser texto markdown en UNA SOLA LÍNEA (no array)
+- NO agregues explicaciones adicionales fuera del JSON
+- El contenido debe estar en español pero los NOMBRES DE CAMPOS en inglés
 - Enfócate en la relevancia para Argentina
 - Mantén la información actualizada y precisa
+
+EJEMPLO DEL FORMATO EXACTO REQUERIDO:
+```json
+{
+  "title": "Mi título aquí",
+  "excerpt": "Mi extracto aquí",
+  "content": "# Mi Contenido\\n\\nPárrafo 1 aquí\\n\\n## Subtítulo\\n\\nPárrafo 2 aquí",
+  "category": "Deportes",
+  "tags": "fútbol, liga, argentina, deportes, torneo"
+}
+```
 """
             
             return prompt

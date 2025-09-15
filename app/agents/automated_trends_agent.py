@@ -269,7 +269,7 @@ class AutomatedTrendsAgent:
                 return {"status": "error", "message": "No se pudieron obtener tendencias"}
             
             # 2. Seleccionar tendencia
-            trending_searches = trends_data.get("trending_searches_argentina", [])
+            trending_searches = trends_data.get("trending_topics", [])
             if not trending_searches:
                 return {"status": "error", "message": "No hay tendencias disponibles"}
             
@@ -388,7 +388,7 @@ class AutomatedTrendsAgent:
                 return {"status": "error", "message": "No se pudieron obtener tendencias"}
             
             # 2. Seleccionar tendencia
-            trending_searches = trends_data.get("trending_searches_argentina", [])
+            trending_searches = trends_data.get("trending_topics", [])
             if not trending_searches:
                 return {"status": "error", "message": "No hay tendencias disponibles"}
             

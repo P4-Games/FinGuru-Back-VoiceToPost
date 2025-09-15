@@ -83,7 +83,7 @@ class AgentManager:
                 print("❌ No hay datos de tendencias válidos")
                 return None
             
-            trending_searches = trends_data.get("trending_searches_argentina", [])
+            trending_searches = trends_data.get("trending_topics", [])
             if not trending_searches:
                 print("❌ No hay tendencias disponibles")
                 return None
@@ -280,7 +280,7 @@ Responde ÚNICAMENTE con el número de posición (ejemplo: "3")"""
                     
                     # Crear prompt
                     prompt = content_processor.create_prompt(
-                        {"status": "success", "trending_searches_argentina": [topic_selection["trend"]]},
+                        {"status": "success", "trending_topics": [topic_selection["trend"]]},
                         search_results,
                         topic_selection['title'],
                         topic_selection['position'],

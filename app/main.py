@@ -342,7 +342,7 @@ async def test_execute_multi_trends_agents(
         raise HTTPException(status_code=500, detail=f"Error ejecutando test multi-agentes: {str(e)}")
 
 
-@app.post("/run_trends_agent_guaranteed_news")
+@app.get("/run_trends_agent_guaranteed_news")
 async def execute_trends_agent_guaranteed_news(
     topic_position: Optional[int] = None,
     allow_no_image: Optional[bool] = False,
