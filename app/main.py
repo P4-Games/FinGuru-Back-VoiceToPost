@@ -11,6 +11,7 @@ from utils.middleware import check_subscription, check_sudo_api_key
 from typing import Optional
 from utils.trends_functions import TrendsAPI
 from agents.automated_trends_agent import run_trends_agent, run_multi_trends_agents
+from datetime import datetime
 
 load_env_files()
 openai = OpenAI(
@@ -128,6 +129,15 @@ class TextInput(BaseModel):
 class MultiAgentRequest(BaseModel):
     topic_position: Optional[int] = None
     token: Optional[str] = None
+
+class TestTrendsAgentRequest(BaseModel):
+    test_mode: str = "complete"  # "trends_only", "generate_only", "complete", "multi_agent"
+    topic_position: Optional[int] = None
+    force_refresh: Optional[bool] = False
+    include_metrics: Optional[bool] = True
+    agent_config: Optional[dict] = None
+    topic_title: Optional[str] = None  # Para testear con un tópico específico
+    dry_run: Optional[bool] = False  # Solo genera, no publica
 
 @app.post("/convert_text_v2")
 async def convert_text(data: TextInput, user: dict = Depends(check_subscription)):
@@ -286,3 +296,211 @@ async def execute_multi_trends_agents(
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error ejecutando multi-agentes: {str(e)}")
+
+@app.post("/test_trends_agent")
+async def test_trends_agent(
+    data: TestTrendsAgentRequest,
+    sudo_check: dict = Depends(check_sudo_api_key)
+):
+    """
+    Endpoint para testear diferentes aspectos del agente de tendencias.
+    
+    Permite probar por separado cada parte del proceso o el flujo completo
+    con métricas de tiempo y configuraciones personalizadas.
+    
+    Headers requeridos:
+        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
+    
+    Args:
+        data: Configuración del test con modo, posición, etc.
+        sudo_check: Verificación de SUDO_API_KEY
+        
+    Returns:
+        dict: Resultado detallado del test con métricas y datos generados
+    """
+    try:
+        import time
+        from agents.automated_trends_agent import AutomatedTrendsAgent
+        
+        start_time = time.time()
+        test_result = {"status": "success", "test_mode": data.test_mode}
+        
+        # Crear instancia del agente con configuración personalizada
+        agent = AutomatedTrendsAgent(data.agent_config)
+        
+        if data.test_mode == "trends_only":
+            # Solo obtener tendencias
+            trends_data = agent.get_trending_topics(force_refresh=data.force_refresh)
+            test_result.update({
+                "trends_data": trends_data,
+                "trends_count": len(trends_data.get("trending_searches_argentina", []))
+            })
+            
+        elif data.test_mode == "generate_only":
+            # Solo generar contenido sin publicar
+            if not data.topic_title:
+                # Obtener tendencias primero
+                trends_data = agent.get_trending_topics(force_refresh=data.force_refresh)
+                if trends_data.get("status") != "success":
+                    raise HTTPException(status_code=400, detail="No se pudieron obtener tendencias")
+                    
+                trending_searches = trends_data.get("trending_searches_argentina", [])
+                if not trending_searches:
+                    raise HTTPException(status_code=400, detail="No hay tendencias disponibles")
+                    
+                # Seleccionar tendencia
+                if data.topic_position and 1 <= data.topic_position <= len(trending_searches):
+                    selected_trend = trending_searches[data.topic_position - 1]
+                    topic_title = selected_trend.get("title", "")
+                else:
+                    topic_title = trending_searches[0].get("title", "")
+            else:
+                topic_title = data.topic_title
+                trends_data = {"mock": "usando título específico"}
+            
+            # Buscar información adicional
+            search_results = agent.search_api.search_google_news(topic_title)
+            
+            # Generar contenido
+            prompt = agent.content_processor.create_prompt(
+                trends_data, search_results, topic_title, 
+                data.topic_position or 1, data.agent_config or {}
+            )
+            
+            agent_response = agent.content_processor.generate_article_content(prompt)
+            article_result = agent.content_processor.process_article_data(agent_response)
+            
+            test_result.update({
+                "topic_title": topic_title,
+                "search_results_count": len(search_results.get("organic_results", [])),
+                "article_generated": article_result.get("status") == "success",
+                "article_data": article_result.get("data") if article_result.get("status") == "success" else None,
+                "generation_prompt_length": len(prompt),
+                "raw_response": agent_response if data.include_metrics else "omitido por brevedad"
+            })
+            
+        elif data.test_mode == "complete":
+            # Proceso completo pero con dry_run opcional
+            if data.dry_run:
+                # Simular el proceso completo sin publicar
+                result = agent.run_automated_process(data.topic_position)
+                # Modificar el resultado para indicar que fue dry_run
+                if result.get("status") == "success":
+                    result["status"] = "dry_run_success"
+                    result["message"] = f"DRY RUN: {result.get('message', '')}"
+                    # Remover datos de publicación
+                    result.pop("publish_result", None)
+                test_result = result
+            else:
+                # Proceso completo normal
+                test_result = agent.run_automated_process(data.topic_position)
+                
+        elif data.test_mode == "multi_agent":
+            # Testear proceso multi-agente
+            if data.dry_run:
+                raise HTTPException(status_code=400, detail="dry_run no está soportado en modo multi_agent")
+            test_result = agent.run_multi_agent_process(data.topic_position)
+            
+        else:
+            raise HTTPException(status_code=400, detail=f"Modo de test no válido: {data.test_mode}")
+        
+        # Agregar métricas si están habilitadas
+        if data.include_metrics:
+            end_time = time.time()
+            test_result["metrics"] = {
+                "execution_time_seconds": round(end_time - start_time, 2),
+                "timestamp": datetime.now().isoformat(),
+                "test_config": {
+                    "test_mode": data.test_mode,
+                    "topic_position": data.topic_position,
+                    "force_refresh": data.force_refresh,
+                    "dry_run": data.dry_run,
+                    "has_custom_agent_config": data.agent_config is not None,
+                    "custom_topic_title": data.topic_title
+                }
+            }
+        
+        return test_result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = f"Error en test del agente de tendencias: {str(e)}"
+        if data.include_metrics:
+            error_detail += f"\n\nTraceback:\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+@app.get("/test_trends_agent/cache_status")
+async def get_trends_cache_status(sudo_check: dict = Depends(check_sudo_api_key)):
+    """
+    Obtiene el estado actual del caché del agente de tendencias.
+    
+    Headers requeridos:
+        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
+        
+    Returns:
+        dict: Información detallada sobre el estado del caché
+    """
+    try:
+        from agents.automated_trends_agent import get_cache_status
+        return get_cache_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo estado del caché: {str(e)}")
+
+@app.post("/test_trends_agent/clear_cache")
+async def clear_trends_cache(sudo_check: dict = Depends(check_sudo_api_key)):
+    """
+    Limpia el caché de tendencias para forzar la obtención de datos frescos.
+    
+    Headers requeridos:
+        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
+        
+    Returns:
+        dict: Confirmación de limpieza del caché
+    """
+    try:
+        from agents.automated_trends_agent import clear_trends_cache
+        return clear_trends_cache()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error limpiando caché: {str(e)}")
+
+@app.get("/test_trends_agent/available_agents")
+async def get_available_agents_for_test(sudo_check: dict = Depends(check_sudo_api_key)):
+    """
+    Obtiene la lista de agentes disponibles desde la API.
+    
+    Headers requeridos:
+        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
+        
+    Returns:
+        dict: Lista de agentes disponibles con sus configuraciones
+    """
+    try:
+        from agents.automated_trends_agent import get_available_agents
+        return get_available_agents()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo agentes: {str(e)}")
+
+@app.get("/test_trends_agent/recent_articles")
+async def get_recent_articles_for_test(
+    limit_per_agent: Optional[int] = 2,
+    sudo_check: dict = Depends(check_sudo_api_key)
+):
+    """
+    Obtiene artículos recientes de todos los agentes para análisis.
+    
+    Headers requeridos:
+        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
+        
+    Args:
+        limit_per_agent: Número máximo de artículos por agente (default: 2)
+        
+    Returns:
+        dict: Artículos recientes organizados por agente
+    """
+    try:
+        from agents.automated_trends_agent import get_all_agents_recent_articles
+        return get_all_agents_recent_articles(limit_per_agent)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error obteniendo artículos recientes: {str(e)}")
