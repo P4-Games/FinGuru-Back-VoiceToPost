@@ -144,19 +144,20 @@ class AutomatedTrendsAgent:
                         "message": f"No se pudo obtener imagen para el artículo después de {max_retries} intentos"
                     }
             
-            # Preparar datos para la API
-            format_result = self.article_manager.format_article_for_api(
-                article_data, 
-                self.agent_config.get('userId', 5822)
-            )
+            # Preparar datos para la API - USANDO LÓGICA DEL BACKUP QUE FUNCIONA
+            data = {
+                'title': article_data['title'],
+                'excerpt': article_data['excerpt'],
+                'content': article_data['content'],
+                'category': article_data['category'],
+                'tags': article_data['tags'],
+                'publishAs': '-1' if not article_data.get('publishAs') else str(article_data['publishAs']),
+                'userId': str(self.agent_config.get('userId', 5822))
+            }
             
-            if format_result.get("status") != "success":
-                return format_result
-            
-            formatted_data = format_result["data"]
             filename = article_data['fileName']
             
-            # Crear archivo de imagen
+            # Crear archivo de imagen - USANDO LÓGICA DEL BACKUP
             try:
                 image_file = io.BytesIO(cover_image_data)
                 image_file.name = filename
@@ -166,37 +167,46 @@ class AutomatedTrendsAgent:
                 }
                 
                 print(f"📤 Enviando artículo con imagen ({len(cover_image_data)} bytes)")
+                print(f"   - Enviando datos: {data}")
+                print(f"   - Con archivo: {filename}")
+                print(f"   - Sin headers manuales (requests genera automáticamente)")
                 
-                # Realizar petición POST
+                # Realizar petición POST - EXACTAMENTE COMO EL BACKUP
                 response = requests.post(
                     self.api_endpoint,
                     files=files,
-                    data=formatted_data
+                    data=data,
+                    # NO incluir headers para multipart/form-data
                 )
                 
-                print(f"📡 Response status: {response.status_code}")
+                print(f"   - Response status: {response.status_code}")
+                print(f"   - Response headers: {dict(response.headers)}")
+                print(f"   - Response text: {response.text}")
                 
                 if response.status_code == 200:
                     response_text = response.text.lower()
-                    if any(phrase in response_text for phrase in ['sin imagen', 'no image', 'missing image']):
+                    if 'sin imagen' in response_text or 'no image' in response_text or 'missing image' in response_text:
+                        print("   🚫 ADVERTENCIA: La respuesta del servidor sugiere problema con la imagen")
+                        print(f"   📝 Respuesta completa: {response.text}")
                         return {
-                            "status": "error",
+                            "status": "error", 
                             "message": f"El servidor indica problema con la imagen: {response.text}"
                         }
                     
-                    print("✅ Artículo publicado exitosamente CON imagen")
+                    print("   ✅ Artículo publicado exitosamente CON imagen")
                     return {
                         "status": "success",
-                        "message": "Artículo publicado exitosamente CON imagen",
+                        "message": "Artículo publicado exitosamente CON imagen validada",
                         "response": response.text,
                         "article_title": article_data['title'],
                         "cover_image_size": len(cover_image_data),
                         "filename": filename
                     }
                 else:
+                    print(f"   ❌ Error del servidor: {response.status_code}")
                     return {
                         "status": "error",
-                        "message": f"Error del servidor: {response.status_code} - {response.text}"
+                        "message": f"Error {response.status_code}: {response.text}"
                     }
                     
             except Exception as e:
