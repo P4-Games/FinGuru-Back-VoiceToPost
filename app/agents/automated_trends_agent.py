@@ -2,7 +2,7 @@ import os
 import json
 import requests
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 from openai import OpenAI
 from utils.trends_functions import TrendsAPI
 from load_env import load_env_files
