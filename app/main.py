@@ -10,7 +10,7 @@ from load_env import load_env_files
 from utils.middleware import check_subscription, check_sudo_api_key
 from typing import Optional
 from utils.trends_functions import TrendsAPI
-from agents.automated_trends_agent import run_multi_trends_agents, clear_trends_cache, get_cache_status, get_trending_topics_cached
+from agents.automated_trends_agent import run_multi_trends_agents, clear_trends_cache_standalone, get_cache_status_standalone, get_trending_topics_cached
 
 load_env_files()
 openai = OpenAI(
@@ -284,7 +284,7 @@ async def get_cache_status_endpoint(user: dict = Depends(check_subscription)):
     Returns:
         dict: Estado completo del caché incluyendo datos y timestamps
     """
-    return get_cache_status()
+    return get_cache_status_standalone()
 
 @app.post("/cache/clear")
 async def clear_cache_endpoint(user: dict = Depends(check_subscription)):
@@ -299,7 +299,7 @@ async def clear_cache_endpoint(user: dict = Depends(check_subscription)):
     Returns:
         dict: Confirmación de que el caché fue limpiado
     """
-    return clear_trends_cache()
+    return clear_trends_cache_standalone()
 
 @app.get("/trends/cached")
 async def get_cached_trends(
