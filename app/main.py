@@ -13,8 +13,15 @@ from utils.trends_functions import TrendsAPI
 from agents.automated_trends_agent import run_multi_trends_agents, clear_trends_cache_standalone, get_cache_status_standalone, get_trending_topics_cached
 
 load_env_files()
+
+# Verificar que las variables críticas estén disponibles
+openai_api_key = os.environ.get('OPENAI_API_KEY')
+if not openai_api_key:
+    print("ERROR: OPENAI_API_KEY no está configurada")
+    raise ValueError("OPENAI_API_KEY no está configurada")
+
 openai = OpenAI(
-  api_key=os.environ['OPENAI_API_KEY'],
+  api_key=openai_api_key,
 )
 
 app = FastAPI(
@@ -40,6 +47,17 @@ from onlygpt import iterate_many_times
 @app.get("/")
 async def test():
     return "Test working"
+
+@app.get("/health")
+async def health_check():
+    """
+    Health check endpoint para Cloud Run
+    """
+    return {
+        "status": "healthy",
+        "message": "FinGuru API is running",
+        "version": "0.1"
+    }
 
 @app.post("/convert_audio")
 async def convert_audio(file: UploadFile):
