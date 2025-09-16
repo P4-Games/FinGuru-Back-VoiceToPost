@@ -10,8 +10,7 @@ from load_env import load_env_files
 from utils.middleware import check_subscription, check_sudo_api_key
 from typing import Optional
 from utils.trends_functions import TrendsAPI
-from agents.automated_trends_agent import run_trends_agent, run_multi_trends_agents, run_trends_agent_with_guaranteed_news
-from datetime import datetime
+from agents.automated_trends_agent import  clear_trends_cache, get_cache_status, get_trending_topics_cached, run_multi_agent_process
 
 load_env_files()
 openai = OpenAI(
@@ -130,15 +129,6 @@ class MultiAgentRequest(BaseModel):
     topic_position: Optional[int] = None
     token: Optional[str] = None
 
-class TestTrendsAgentRequest(BaseModel):
-    test_mode: str = "complete"  # "trends_only", "generate_only", "complete", "multi_agent"
-    topic_position: Optional[int] = None
-    force_refresh: Optional[bool] = False
-    include_metrics: Optional[bool] = True
-    agent_config: Optional[dict] = None
-    topic_title: Optional[str] = None  # Para testear con un tópico específico
-    dry_run: Optional[bool] = False  # Solo genera, no publica
-
 @app.post("/convert_text_v2")
 async def convert_text(data: TextInput, user: dict = Depends(check_subscription)):
     """
@@ -225,7 +215,9 @@ async def get_trending_topics(
     user: dict = Depends(check_subscription)
 ):
     """
-    Devuelve los temas de tendencia actuales usando Google Trends a través de SerpAPI.
+    ⚠️ ENDPOINT LEGACY: Obtiene tendencias directamente de SerpAPI (consume cuota).
+    
+    RECOMENDACIÓN: Usa /trends/cached en su lugar para ahorrar llamadas API.
     
     Args:
         geo: Código de país de dos letras (ej. AR, US, ES)
@@ -246,40 +238,22 @@ async def get_trending_topics(
         count=count
     )
 
-@app.post("/run_trends_agent")
-async def execute_trends_agent():
-    """
-    Ejecuta el agente automatizado que:
-    1. Obtiene las tendencias actuales
-    2. Busca información adicional del primer tema
-    3. Genera un artículo completo usando ChatGPT
-    4. Publica el artículo automáticamente en fin.guru
-    
-    Args:
-        user: Información del usuario autenticado (inyectada por validate_token)
-        
-    Returns:
-        dict: Resultado del proceso automatizado
-    """
-    try:
-        result = run_trends_agent()
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error ejecutando agente: {str(e)}")
-
 @app.get("/run_multi_trends_agents")
 async def execute_multi_trends_agents(
     topic_position: Optional[int] = None,
     sudo_check: dict = Depends(check_sudo_api_key)
 ):
     """
-    Ejecuta múltiples agentes automatizados que obtienen sus configuraciones desde la API.
+    🚀 ENDPOINT OPTIMIZADO: Ejecuta múltiples agentes con caché inteligente de tendencias.
 
-    Esta función:
+    Esta función optimizada:
     1. Obtiene los agentes disponibles desde NEXT_PUBLIC_API_URL/agent-ias
-    2. Inicializa cada agente con su configuración única (personality, trending, format_markdown)
-    3. Ejecuta todos los agentes con la misma tendencia pero usando sus configuraciones específicas
-    4. Publica los artículos automáticamente en fin.guru
+    2. Obtiene las tendencias UNA SOLA VEZ y las comparte entre todos los agentes
+    3. Inicializa cada agente con su configuración única (personality, trending, format_markdown)
+    4. Ejecuta todos los agentes con las mismas tendencias cached
+    5. Publica los artículos automáticamente en fin.guru
+    
+    ⚡ AHORRO DE API: En lugar de 5+ llamadas a SerpAPI, solo hace 1 llamada cada 30 minutos.
     
     Headers requeridos:
         X-SUDO-API-KEY: Clave SUDO para acceso administrativo
@@ -292,155 +266,63 @@ async def execute_multi_trends_agents(
         dict: Resultado del proceso multi-agente con resumen de éxitos y fallos
     """
     try:
-        result = run_multi_trends_agents(topic_position=topic_position)
+        result = run_multi_agent_process(topic_position=topic_position)
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error ejecutando multi-agentes: {str(e)}")
 
-@app.get("/test_multi_trends_agents")
-async def test_execute_multi_trends_agents(
-    topic_position: Optional[int] = None,
-    sudo_check: dict = Depends(check_sudo_api_key)
+@app.get("/cache/status")
+async def get_cache_status_endpoint(user: dict = Depends(check_subscription)):
+    """
+    Obtiene el estado actual del caché de tendencias.
+    
+    Muestra información útil para optimizar el uso de SerpAPI:
+    - Si hay datos en caché
+    - Cuándo expira el caché actual
+    - Número de tendencias almacenadas
+    
+    Returns:
+        dict: Estado completo del caché incluyendo datos y timestamps
+    """
+    return get_cache_status()
+
+@app.post("/cache/clear")
+async def clear_cache_endpoint(user: dict = Depends(check_subscription)):
+    """
+    Limpia manualmente el caché de tendencias.
+    
+    Útil cuando:
+    - Quieres forzar una nueva consulta a SerpAPI
+    - Has cambiado configuraciones y necesitas datos frescos
+    - Hay problemas con datos cached
+    
+    Returns:
+        dict: Confirmación de que el caché fue limpiado
+    """
+    return clear_trends_cache()
+
+@app.get("/trends/cached")
+async def get_cached_trends(
+    geo: Optional[str] = "AR", 
+    hours: Optional[int] = 24,
+    language: Optional[str] = "es-419",
+    count: Optional[int] = 10,
+    user: dict = Depends(check_subscription)
 ):
     """
-    [TESTING] Ejecuta múltiples agentes automatizados SIEMPRE con tendencias frescas de Google.
+    🚀 ENDPOINT OPTIMIZADO: Obtiene tendencias usando caché inteligente.
     
-    A diferencia de /run_multi_trends_agents, esta ruta de testing:
-    - Siempre limpia el caché de tendencias antes de ejecutar
-    - Fuerza la obtención de tendencias frescas desde Google
-    - Útil para testing y desarrollo cuando se quieren evitar duplicados del caché
-    
-    Headers requeridos:
-        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
+    Este endpoint utiliza un sistema de caché de 30 minutos para minimizar las llamadas a SerpAPI.
+    Perfecto para conservar tus 100 llamadas mensuales.
     
     Args:
-        topic_position: Posición específica de tendencia (1-10) o None para auto-selección por ChatGPT
-        sudo_check: Verificación de SUDO_API_KEY (inyectada automáticamente)
+        geo: Código de país de dos letras (ej. AR, US, ES)
+        hours: Número de horas para las tendencias (24 por defecto)
+        language: Código de idioma (es-419 para español de Latinoamérica)
+        count: Número de resultados a devolver
+        user: Información del usuario autenticado
         
     Returns:
-        dict: Resultado del proceso multi-agente con tendencias frescas
+        dict: Tendencias con información de caché (cached: true/false)
     """
-    try:
-        # Importar la función para limpiar caché
-        from agents.automated_trends_agent import AutomatedTrendsAgent
-        
-        # Limpiar caché de tendencias antes de ejecutar
-        AutomatedTrendsAgent.clear_trends_cache()
-        print("🧹 Caché de tendencias limpiado para testing - obteniendo tendencias frescas")
-        
-        # Ejecutar el proceso con tendencias frescas
-        result = run_multi_trends_agents(topic_position=topic_position)
-        
-        # Agregar información de que fue un test con tendencias frescas
-        if isinstance(result, dict):
-            result["test_mode"] = True
-            result["fresh_trends_used"] = True
-            result["cache_cleared"] = True
-        
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error ejecutando test multi-agentes: {str(e)}")
-
-
-@app.get("/run_trends_agent_guaranteed_news")
-async def execute_trends_agent_guaranteed_news(
-    topic_position: Optional[int] = None,
-    allow_no_image: Optional[bool] = False,
-    sudo_check: dict = Depends(check_sudo_api_key)
-):
-    """
-    🔥 Ejecuta el agente automatizado GARANTIZANDO la obtención de noticias.
-    
-    Esta función es similar a /run_trends_agent pero con garantías mejoradas:
-    1. Obtiene las tendencias actuales
-    2. 🚨 GARANTIZA obtener noticias (hasta 8 intentos con diferentes estrategias)
-    3. Valida que las noticias tengan contenido suficiente
-    4. Genera un artículo completo usando ChatGPT
-    5. Publica el artículo automáticamente en fin.guru
-    
-    Headers requeridos:
-        X-SUDO-API-KEY: Clave SUDO para acceso administrativo
-        
-    Args:
-        topic_position: Posición específica de tendencia (1-10) o None para auto-selección
-        allow_no_image: Si se permite publicar sin imagen como último recurso
-        sudo_check: Verificación de SUDO_API_KEY (inyectada automáticamente)
-        
-    Returns:
-        dict: Resultado del proceso con información de noticias garantizadas
-        {
-            "status": "success|error",
-            "message": "Mensaje descriptivo",
-            "trend_title": "Título de la tendencia usada",
-            "news_guaranteed": true,
-            "news_count": 5,
-            "news_query_used": "Query que funcionó para obtener noticias",
-            "news_search_type": "Tipo de búsqueda exitosa",
-            "article_data": {...},
-            "publish_result": {...},
-            "timestamp": "2025-09-15T..."
-        }
-    """
-    try:
-        result = run_trends_agent_with_guaranteed_news(
-            topic_position=topic_position, 
-            allow_no_image=allow_no_image
-        )
-        
-        # Agregar información adicional para el endpoint
-        if isinstance(result, dict):
-            result["endpoint"] = "/run_trends_agent_guaranteed_news"
-            result["guaranteed_news_feature"] = True
-            
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error ejecutando agente con noticias garantizadas: {str(e)}")
-
-
-@app.get("/test_guaranteed_news")
-async def test_guaranteed_news_endpoint(
-    topic_position: Optional[int] = None,
-    allow_no_image: Optional[bool] = False
-):
-    """
-    🧪 [TESTING] Endpoint GET simple para probar noticias garantizadas sin autenticación SUDO.
-    
-    Esta es una versión simplificada de /run_trends_agent_guaranteed_news para testing:
-    - No requiere headers especiales ni autenticación SUDO
-    - Útil para desarrollo y testing rápido
-    - Ejecuta el proceso completo con noticias garantizadas
-    
-    Args:
-        topic_position: Posición específica de tendencia (1-10) o None para auto-selección
-        allow_no_image: Si se permite publicar sin imagen como último recurso
-        
-    Returns:
-        dict: Resultado del proceso con información detallada de noticias
-    
-    Ejemplo de uso:
-        GET /test_guaranteed_news?topic_position=1&allow_no_image=false
-    """
-    try:
-        print(f"🧪 [TEST] Ejecutando agente con noticias garantizadas...")
-        print(f"   Topic position: {topic_position}")
-        print(f"   Allow no image: {allow_no_image}")
-        
-        result = run_trends_agent_with_guaranteed_news(
-            topic_position=topic_position, 
-            allow_no_image=allow_no_image
-        )
-        
-        # Agregar información de testing
-        if isinstance(result, dict):
-            result["endpoint"] = "/test_guaranteed_news"
-            result["test_mode"] = True
-            result["guaranteed_news_feature"] = True
-            result["timestamp_request"] = datetime.now().isoformat()
-            
-        print(f"🧪 [TEST] Resultado: {result.get('status', 'unknown')}")
-        
-        return result
-    except Exception as e:
-        error_detail = f"Error en test de agente con noticias garantizadas: {str(e)}"
-        print(f"❌ [TEST] {error_detail}")
-        raise HTTPException(status_code=500, detail=error_detail)
+    return get_trending_topics_cached()
