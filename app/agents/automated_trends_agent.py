@@ -24,6 +24,8 @@ from .agent_api_utils import (
 )
 from .agent_content_utils import (
     _is_topic_similar_to_recent_articles,
+    _is_topic_trivial_or_contextual,
+    _validate_article_depth,
     create_prompt,
     generate_article_content,
     process_article_data,
@@ -359,6 +361,24 @@ class AutomatedTrendsAgent:
             if not article_content:
                 return {"status": "error", "message": "No se pudo generar contenido"}
             
+            # NUEVO: Validar profundidad del artículo
+            print("5.5. Validando profundidad del análisis...")
+            depth_validation = _validate_article_depth(article_content)
+            
+            if not depth_validation['is_valid']:
+                print(f"   ⚠️  RECHAZO: Artículo no tiene suficiente profundidad")
+                print(f"   📊 Puntuación: {depth_validation['depth_score']:.0f}/100")
+                for issue in depth_validation['issues']:
+                    print(f"      - {issue}")
+                return {
+                    "status": "skipped",
+                    "message": "Artículo rechazado por falta de profundidad",
+                    "reason": " | ".join(depth_validation['issues']),
+                    "depth_score": depth_validation['depth_score']
+                }
+            
+            print(f"   ✅ Profundidad validada: {depth_validation['depth_score']:.0f}/100")
+            
             print("6. Procesando datos del artículo...")
             article_data = process_article_data(article_content)
             
@@ -624,17 +644,19 @@ TENDENCIAS ACTUALES (últimas 24h):
 
 🚫 REGLAS ESTRICTAS - NO VIOLAR:
 - ❌ PROHIBIDO: NO elijas tendencias marcadas con "❌ [YA SELECCIONADA - NO USAR]"
+- ❌ PROHIBIDO: NO elijas tendencias triviales (efemérides, "noches temáticas", paros sin análisis, etc.)
 - ❌ PROHIBIDO: NO elijas tendencias sobre el MISMO evento/persona/noticia específica de los artículos recientes
 - ✅ PERMITIDO: Puedes elegir la MISMA CATEGORÍA pero con tema específico diferente
-- ✅ OBLIGATORIO: SOLO elige entre las tendencias SIN la marca ❌
-- 🔍 VALIDACIÓN: Si NINGUNA tendencia cumple con los criterios, responde "NO_SUITABLE_TOPIC"
+- ✅ OBLIGATORIO: SOLO elige entre las tendencias SIN marca ❌
+- 🔍 VALIDACIÓN: Si NINGUNA tendencia cumple con criterios, responde "NO_SUITABLE_TOPIC"
 
 🔍 ANÁLISIS REQUERIDO:
-1. Revisa cada tendencia disponible (sin ❌)
-2. Compara CONTENIDO ESPECÍFICO (no categorías) con los artículos recientes 
-3. Evalúa si la tendencia habla del mismo evento/persona/noticia específica
-4. Si encuentras una tendencia con contenido específico diferente, elige la más relevante
-5. Si NO encuentras ninguna tendencia que valga la pena, responde "NO_SUITABLE_TOPIC"
+1. RECHAZA: Temas triviales/contextuales (efemérides, "noche de X", paros sin contexto profundo)
+2. Revisa cada tendencia disponible (sin ❌)
+3. Compara CONTENIDO ESPECÍFICO (no categorías) con artículos recientes 
+4. Evalúa si habla del mismo evento/persona/noticia específica
+5. Elige tendencia con contenido diferente y valor investigativo
+6. Si NO encuentras tendencia adecuada, responde "NO_SUITABLE_TOPIC"
 
 FORMATO DE RESPUESTA OBLIGATORIO:
 POSICIÓN: [número del 1 al 16 O "NO_SUITABLE_TOPIC"]
@@ -643,7 +665,7 @@ RAZÓN: [explicación detallada de por qué la elegiste y cómo el CONTENIDO ESP
 
 Ejemplo exitoso:
 POSICIÓN: 3
-TÍTULO: dólar blue argentina
+TÍTULO: Dólar blue Argentina
 RAZÓN: Aunque hay artículos de economía recientes, este tema específico sobre el dólar blue es diferente del contenido ya publicado sobre inflación
 
 Ejemplo sin tema adecuado:
@@ -741,6 +763,15 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
                         print(f"   ⚠️  No se encontró alternativa, procediendo con la selección original (puede haber similitud con todos los agentes)")
             
             if selected_position and selected_title:
+                # NUEVO: Verificar que no sea un tema trivial/contextual
+                if _is_topic_trivial_or_contextual(selected_title):
+                    print(f"   ⚠️  RECHAZO: Tema '{selected_title}' es trivial/contextual")
+                    return {
+                        "status": "no_suitable_topic",
+                        "message": "Tema seleccionado es trivial o contextual sin valor investigativo",
+                        "reason": "El tema seleccionado no cumple estándares de calidad editorial (tema superficial, sin análisis profundo)"
+                    }
+                
                 self._selected_positions_session.add(selected_position)
                 self._selected_trends_session.add(selected_title)
                 
@@ -813,6 +844,27 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
             
             if not article_content:
                 return {"status": "error", "message": "No se pudo generar contenido"}
+            
+            # NUEVO: Validar profundidad del artículo
+            print("5.5. Validando profundidad del análisis...")
+            depth_validation = _validate_article_depth(article_content)
+            
+            if not depth_validation['is_valid']:
+                print(f"   ⚠️  RECHAZO: Artículo no tiene suficiente profundidad")
+                print(f"   📊 Puntuación: {depth_validation['depth_score']:.0f}/100")
+                for issue in depth_validation['issues']:
+                    print(f"      - {issue}")
+                return {
+                    "status": "skipped",
+                    "agent_name": self.agent_name,
+                    "agent_id": self.agent_id,
+                    "message": "Artículo rechazado por falta de profundidad analítica",
+                    "reason": " | ".join(depth_validation['issues']),
+                    "depth_score": depth_validation['depth_score'],
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            print(f"   ✅ Profundidad validada: {depth_validation['depth_score']:.0f}/100")
             
             print("6. Procesando datos del artículo...")
             article_data = process_article_data(article_content)

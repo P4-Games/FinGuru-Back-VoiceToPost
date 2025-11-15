@@ -205,51 +205,100 @@ def get_all_agents_recent_articles(agent, limit_per_agent: int = 2) -> Dict[str,
         }
 
 def search_google_news(agent, query: str) -> Dict[str, Any]:
-    """Busca información adicional sobre el tema en Google usando Serper API"""
+    """Busca información adicional sobre el tema en Google usando Serper API.
+    Mejorado para incluir análisis económico/político, comparación internacional, 
+    y contexto histórico que enriquezca la generación de artículos profundos."""
     try:
-        enhanced_query = f"{query}"
+        # PASO 1: Búsqueda primaria del tema
+        print(f"   [BÚSQUEDA 1/3] Tema principal: {query}")
+        primary_results = _search_serper(agent, query, location="Argentina")
         
+        # PASO 2: Búsqueda secundaria - Análisis del impacto
+        impact_query = f"{query} impacto económico análisis"
+        print(f"   [BÚSQUEDA 2/3] Análisis de impacto: {impact_query}")
+        impact_results = _search_serper(agent, impact_query, location="Argentina")
+        
+        # PASO 3: Búsqueda terciaria - Comparación internacional
+        intl_query = f"{query} comparación internacional precedente similar"
+        print(f"   [BÚSQUEDA 3/3] Contexto internacional: {intl_query}")
+        intl_results = _search_serper(agent, intl_query, location=None)
+        
+        # CONSOLIDAR resultados: primarios + impacto + internacional
+        consolidated = _merge_serper_results(primary_results, impact_results, intl_results)
+        
+        print(f"   ✓ Resultados totales consolidados:")
+        print(f"     - Orgánicos: {len(consolidated.get('organic_results', []))}")
+        print(f"     - Top stories: {len(consolidated.get('top_stories', []))}")
+        
+        return consolidated
+        
+    except Exception as e:
+        print(f"   Error en búsqueda de Google News: {str(e)}")
+        return {}
+
+def _search_serper(agent, query: str, location: Optional[str] = "Argentina") -> Dict[str, Any]:
+    """Ejecuta una búsqueda individual en Serper y convierte el formato."""
+    try:
         url = "https://google.serper.dev/search"
         
-        payload = json.dumps({
-            "q": enhanced_query,
-            "location": "Argentina",
-            "gl": "ar",
-            "hl": "es-419",
+        payload = {
+            "q": query,
             "num": 10
-        })
+        }
+        
+        if location:
+            payload["location"] = location
+            payload["gl"] = "ar"
+        
+        payload["hl"] = "es-419"
         
         headers = {
             'X-API-KEY': agent.serper_api_key,
             'Content-Type': 'application/json'
         }
         
-        response = requests.post(url, headers=headers, data=payload)
+        response = requests.post(url, headers=headers, data=json.dumps(payload))
         response.raise_for_status()
         
         results = response.json()
-        
-        converted_results = _convert_serper_to_serpapi_format(results)
-        
-        print(f"   Búsqueda realizada con Serper: {enhanced_query}")
-        print(f"   Resultados orgánicos encontrados: {len(converted_results.get('organic_results', []))}")
-        print(f"   Top stories encontradas: {len(converted_results.get('top_stories', []))}")
-        
-        if "organic_results" in converted_results:
-            print("   Primeros resultados orgánicos:")
-            for i, result in enumerate(converted_results["organic_results"][:3]):
-                print(f"      {i+1}. {result.get('title', 'Sin título')}")
-        
-        if "top_stories" in converted_results:
-            print("   Top stories:")
-            for i, story in enumerate(converted_results["top_stories"][:3]):
-                print(f"      {i+1}. {story.get('title', 'Sin título')}")
-        
-        return converted_results
+        return _convert_serper_to_serpapi_format(results)
         
     except Exception as e:
-        print(f"   Error searching Google with Serper: {str(e)}")
+        print(f"      Error en _search_serper: {str(e)}")
         return {}
+
+def _merge_serper_results(primary: Dict, impact: Dict, international: Dict) -> Dict[str, Any]:
+    """Consolida resultados de múltiples búsquedas eliminando duplicados y priorizando."""
+    merged = {
+        "top_stories": [],
+        "organic_results": []
+    }
+    
+    # Consolidar top stories (eliminar duplicados por título)
+    seen_titles = set()
+    for results in [primary, impact, international]:
+        for story in results.get("top_stories", []):
+            title = story.get("title", "").lower()
+            if title and title not in seen_titles:
+                seen_titles.add(title)
+                merged["top_stories"].append(story)
+    
+    # Limitar a 5 top stories
+    merged["top_stories"] = merged["top_stories"][:5]
+    
+    # Consolidar organic results (eliminar duplicados por URL)
+    seen_urls = set()
+    for results in [primary, impact, international]:
+        for result in results.get("organic_results", []):
+            link = result.get("link", "")
+            if link and link not in seen_urls:
+                seen_urls.add(link)
+                merged["organic_results"].append(result)
+    
+    # Limitar a 10 resultados orgánicos
+    merged["organic_results"] = merged["organic_results"][:10]
+    
+    return merged
 
 def search_google_images(agent, query: str) -> str:
     """Busca una imagen relevante usando Serper API con múltiples intentos"""
