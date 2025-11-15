@@ -615,7 +615,7 @@ Tu contenido DEBE ser riguroso, equilibrado, fundamentado en datos y perspectiva
 
 📋 ESTRUCTURA REQUERIDA (Adaptada a tu estilo):
 
-{format_template if format_template and format_template.strip() else """
+{format_template if format_template and format_template.strip() else '''
 # [Título conciso y sobrio - primera letra mayúscula + nombres propios]
 
 [Introducción: Plantea la pregunta central y contexto. 70-100 palabras]
@@ -638,8 +638,8 @@ Incluir: impacto calculable, datos de impacto.]
 ## 🔮 Perspectiva y advertencias futuras
 
 [Conclusión con proyección. Perspectiva de futuro o advertencias. 70-100 palabras.
-Incluir: tendencias predichas, recomendaciones, outlook.]
-"""}
+Incluir: tendencias predictas, recomendaciones, outlook.]
+'''}
 
 ═══════════════════════════════════════════════════════════════════════════
 
