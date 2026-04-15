@@ -10,7 +10,13 @@ from load_env import load_env_files
 from utils.middleware import check_subscription, check_sudo_api_key
 from typing import Optional
 from utils.trends_functions import TrendsAPI
-from agents.automated_trends_agent import run_multi_trends_agents, clear_trends_cache_standalone, get_cache_status_standalone, get_trending_topics_cached
+from agents.automated_trends_agent import (
+    run_multi_trends_agents,
+    run_multi_trends_agents_v2,
+    clear_trends_cache_standalone,
+    get_cache_status_standalone,
+    get_trending_topics_cached,
+)
 
 load_env_files()
 
@@ -98,8 +104,12 @@ async def _transfer_tokens(address_to_send:str, tokenAmount:float):
     return transfer_tokens(address_to_send, tokenAmount)
     
 from db import connect_to_mongo
-db = connect_to_mongo()
-db = db.db
+db = None
+try:
+    db = connect_to_mongo().db
+except Exception as e:
+    print(f"⚠️ MongoDB no disponible en arranque: {str(e)}")
+    print("⚠️ El endpoint /views quedará deshabilitado hasta que Mongo esté accesible")
 
 class ParamsToClaimTokens(BaseModel):
     id: int
@@ -108,6 +118,9 @@ class ParamsToClaimTokens(BaseModel):
     
 @app.post("/views")
 async def views(data:ParamsToClaimTokens):
+    if db is None:
+        raise HTTPException(status_code=503, detail="MongoDB no disponible. Endpoint /views deshabilitado en este entorno.")
+
     id = data.id
     viewsAmount = data.viewsAmount
     address = data.address
@@ -139,6 +152,12 @@ class TextInput(BaseModel):
 class MultiAgentRequest(BaseModel):
     topic_position: Optional[int] = None
     token: Optional[str] = None
+
+
+class MultiAgentV2Request(BaseModel):
+    topic_position: Optional[int] = None
+    dry_run: bool = False
+    correlation_id: Optional[str] = None
 
 @app.post("/convert_text_v2")
 async def convert_text(data: TextInput, user: dict = Depends(check_subscription)):
@@ -277,10 +296,67 @@ async def execute_multi_trends_agents(
         dict: Resultado del proceso multi-agente con resumen de éxitos y fallos
     """
     try:
-        result = run_multi_trends_agents(topic_position=topic_position)
-        return result
+        # Compatibilidad legacy para Google Scheduler: mismo endpoint, motor v2 interno.
+        v2_result = run_multi_trends_agents_v2(
+            topic_position=topic_position,
+            dry_run=False,
+        )
+
+        if v2_result.get("status") == "success":
+            execution = v2_result.get("execution", {})
+            return {
+                "status": "success",
+                "message": (
+                    f"Proceso multi-agente completado: "
+                    f"{execution.get('successful', 0)} exitosos, "
+                    f"{execution.get('skipped', 0)} omitidos, "
+                    f"{execution.get('failed', 0)} fallidos"
+                ),
+                "results": v2_result.get("results", []),
+                "summary": {
+                    "total_agents": execution.get("agents_total", 0),
+                    "successful": execution.get("successful", 0),
+                    "failed": execution.get("failed", 0),
+                    "skipped": execution.get("skipped", 0),
+                },
+                "legacy_endpoint": True,
+                "engine_version": "v2",
+                "correlation_id": v2_result.get("correlation_id"),
+            }
+
+        # Fallback de seguridad al motor legacy si el v2 falla.
+        legacy_result = run_multi_trends_agents(topic_position=topic_position)
+        legacy_result["engine_version"] = "legacy-fallback"
+        return legacy_result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error ejecutando multi-agentes: {str(e)}")
+
+
+@app.post("/v2/trends/agents/run")
+async def execute_multi_trends_agents_v2(
+    payload: MultiAgentV2Request,
+    sudo_check: dict = Depends(check_sudo_api_key)
+):
+    """
+    Endpoint v2 (breaking) para ejecución de agentes de tendencias.
+
+    Contrato nuevo con respuesta estructurada:
+    - correlation_id por ejecución y por agente
+    - metadata de selección de tema
+    - prompt fingerprint
+    - parámetros efectivos del LLM
+    - score de profundidad y policy checks
+    - resultado de publicación
+    """
+    try:
+        result = run_multi_trends_agents_v2(
+            topic_position=payload.topic_position,
+            dry_run=payload.dry_run,
+            correlation_id=payload.correlation_id,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error ejecutando multi-agentes v2: {str(e)}")
 
 @app.get("/cache/status")
 async def get_cache_status_endpoint(user: dict = Depends(check_subscription)):

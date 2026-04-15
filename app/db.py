@@ -21,6 +21,8 @@ def get_database() -> Database:
     raise HTTPException(status_code=500, detail="Database not connected")
 
 def connect_to_mongo():
+    if not MONGO_URI:
+        raise HTTPException(status_code=500, detail="MONGODB_URI no está configurada")
     db.client = MongoClient(host=MONGO_URI,
                             tls=True,
                             tlsAllowInvalidCertificates=True)

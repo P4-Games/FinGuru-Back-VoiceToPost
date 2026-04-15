@@ -3,6 +3,7 @@ import re
 import html
 import string
 import random
+import hashlib
 from typing import Dict, Any, List
 import unicodedata
 
@@ -70,6 +71,49 @@ DEEP_ANALYSIS_KEYWORDS = {
     'evidencia', 'datos', 'cifras', 'estadísticas', 'estudio', 'investigación',
     'encuesta', 'informe', 'análisis', 'conclusión', 'resultado'
 }
+
+
+def _build_profile_directives(writing_style: str, tone: str, target_audience: str) -> str:
+    """Convierte campos editoriales en reglas concretas de redacción."""
+    style_map = {
+        "periodistico": "Usa estructura periodística: contexto, dato, contraste y conclusión en cada sección.",
+        "analitico": "Prioriza relaciones causa-efecto, comparación de escenarios y síntesis estratégica.",
+        "didactico": "Explica conceptos complejos con lenguaje claro y ejemplos concretos.",
+        "opinion": "Sostén una tesis clara con argumentos verificables y contraargumentos.",
+    }
+
+    tone_map = {
+        "neutral": "Mantén tono equilibrado, evita adjetivos grandilocuentes y sesgo ideológico explícito.",
+        "formal": "Usa registro formal, preciso y sobrio, evitando coloquialismos.",
+        "cercano": "Mantén claridad y cercanía sin perder rigor técnico ni precisión factual.",
+        "critico": "Evalúa riesgos y contradicciones con base en datos, no en opiniones vagas.",
+    }
+
+    audience_map = {
+        "invers": "Incluye lectura de riesgo, impacto en activos y escenarios de corto/mediano plazo.",
+        "empr": "Aterriza implicancias para pymes/startups: costos, demanda y estrategia operativa.",
+        "general": "Evita jerga innecesaria y define términos técnicos en lenguaje cotidiano.",
+        "joven": "Usa ejemplos contemporáneos y explicaciones escalonadas de lo simple a lo complejo.",
+    }
+
+    style_key = (writing_style or "").strip().lower()
+    tone_key = (tone or "").strip().lower()
+    audience_key = (target_audience or "").strip().lower()
+
+    audience_rule = "Adecúa profundidad y vocabulario al nivel de conocimiento declarado por la audiencia."
+    for k, v in audience_map.items():
+        if k in audience_key:
+            audience_rule = v
+            break
+
+    style_rule = style_map.get(style_key, "Mantén consistencia estilística entre secciones, sin cambios bruscos de registro.")
+    tone_rule = tone_map.get(tone_key, "Sostén un tono coherente a lo largo de todo el artículo.")
+
+    return (
+        f"- Regla de estilo ({writing_style}): {style_rule}\n"
+        f"- Regla de tono ({tone}): {tone_rule}\n"
+        f"- Regla de audiencia ({target_audience}): {audience_rule}"
+    )
 
 def _is_topic_trivial_or_contextual(topic_title: str) -> bool:
     """Verifica si un tópico es trivial o contextual (debe ser rechazado).
@@ -408,6 +452,37 @@ def create_prompt(agent, trends_data: Dict[str, Any], search_results: Dict[str, 
     personality = agent.personality
     trending_instructions = agent.trending_prompt
     format_template = agent.format_markdown
+    writing_style = getattr(agent, "writing_style", "periodistico")
+    tone = getattr(agent, "tone", "neutral")
+    target_audience = getattr(agent, "target_audience", "audiencia general argentina")
+    preferred_categories = getattr(agent, "preferred_categories", []) or []
+    forbidden_topics = getattr(agent, "forbidden_topics", []) or []
+    example_article = getattr(agent, "example_article", "")
+    profile_signature_source = "|".join([
+        str(getattr(agent, "agent_id", "")),
+        writing_style,
+        tone,
+        target_audience,
+        ",".join(preferred_categories),
+        ",".join(forbidden_topics),
+    ])
+    profile_signature = hashlib.sha256(profile_signature_source.encode("utf-8")).hexdigest()[:12]
+    profile_directives = _build_profile_directives(writing_style, tone, target_audience)
+
+    preferred_categories_text = ", ".join(preferred_categories) if preferred_categories else "Sin preferencias explícitas"
+    forbidden_topics_text = ", ".join(forbidden_topics) if forbidden_topics else "Sin temas prohibidos explícitos"
+    example_article_block = ""
+    if isinstance(example_article, str) and example_article.strip():
+        trimmed_example = example_article.strip()
+        if len(trimmed_example) > 2200:
+            trimmed_example = trimmed_example[:2200] + "\n..."
+        example_article_block = f"""
+
+═══════════════════════════════════════════════════════════════════════════
+
+🧪 EJEMPLO DE ESTILO (REFERENCIA):
+{trimmed_example}
+"""
     
     # Mejorada conversión de formato_markdown (HTML → Markdown)
     if format_template and format_template.strip():
@@ -444,6 +519,17 @@ def create_prompt(agent, trends_data: Dict[str, Any], search_results: Dict[str, 
 ═══════════════════════════════════════════════════════════════════════════
 
 TÓPICO ASIGNADO PARA ANÁLISIS: "{selected_trend}"
+
+PERFIL EDITORIAL DEL AGENTE (OBLIGATORIO RESPETAR):
+- Estilo de escritura: {writing_style}
+- Tono: {tone}
+- Audiencia objetivo: {target_audience}
+- Categorías preferidas: {preferred_categories_text}
+- Temas prohibidos: {forbidden_topics_text}
+- Firma de perfil: {profile_signature} (si cambia el perfil, debe cambiar el enfoque del artículo)
+
+REGLAS VINCULANTES DERIVADAS DEL PERFIL:
+{profile_directives}
 
 ═══════════════════════════════════════════════════════════════════════════
 
@@ -689,9 +775,12 @@ FORMATO FINAL:
 5. Estructura con mínimo 5 párrafos sustanciales (70+ palabras cada uno)
 6. Escribe solo el Markdown final
 7. No incluyas auto-evaluaciones ni explicaciones
+8. El contenido DEBE reflejar explícitamente las reglas derivadas del perfil y no sonar genérico
 
 RECUERDA: FinGuru requiere ANÁLISIS RIGUROSO, no noticias. Tu trabajo es explicar 
 POR QUÉ algo importa, NO simplemente QUÉ pasó.
+
+{example_article_block}
 
 ═══════════════════════════════════════════════════════════════════════════"""
 
@@ -715,8 +804,8 @@ def generate_article_content(agent, prompt: str) -> str:
                 {"role": "system", "content": system_message},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1400,  # Aumentado de 1200 para permitir más desarrollo
-            temperature=0.6,   # Reducido de 0.7 para mayor rigor
+            max_tokens=max(256, int(getattr(agent, "max_tokens", 1400))),
+            temperature=max(0.0, min(1.5, float(getattr(agent, "temperature", 0.6)))),
             top_p=0.9,         # Controlado para variedad
             frequency_penalty=0.3,  # Evita repeticiones
             presence_penalty=0.1    # Fomenta contenido nuevo

@@ -2,6 +2,7 @@ import requests
 import json
 import io
 from typing import Dict, Any, Optional
+from .agent_profile import AgentProfile
 
 def get_available_agents(agent) -> Dict[str, Any]:
     """Obtiene todos los agentes disponibles desde la API"""
@@ -24,30 +25,25 @@ def get_available_agents(agent) -> Dict[str, Any]:
         
         if 'details' in data:
             agents = data['details']
+            if isinstance(agents, list) and agents:
+                processed_agents = []
+                for item in agents:
+                    if isinstance(item, dict) and 'attributes' in item:
+                        profile = AgentProfile.from_api_payload(item)
+                        processed_agents.append(profile.to_agent_dict())
+                    elif isinstance(item, dict):
+                        profile = AgentProfile.from_flat_payload(item)
+                        processed_agents.append(profile.to_agent_dict())
+                if processed_agents:
+                    agents = processed_agents
         else:
             agents = data.get('data', [])
             if isinstance(agents, list) and agents:                    
                 processed_agents = []
                 for agent_item in agents:
                     if isinstance(agent_item, dict):
-                        user_id = None
-                        user_data = agent_item.get('attributes', {}).get('user', {})
-                        if isinstance(user_data, dict) and 'data' in user_data:
-                            user_id = user_data.get('data', {}).get('id')
-                        elif isinstance(user_data, dict) and 'id' in user_data:
-                            user_id = user_data.get('id')
-                        
-                        processed_agent = {
-                            'id': agent_item.get('id'),
-                            'name': agent_item.get('attributes', {}).get('name', f"agent-{agent_item.get('id')}"),
-                            'personality': agent_item.get('attributes', {}).get('personality', ''),
-                            'trending': agent_item.get('attributes', {}).get('trending', ''),
-                            'format_markdown': agent_item.get('attributes', {}).get('format_markdown', ''),
-                            'userId': user_id,
-                            'createdAt': agent_item.get('attributes', {}).get('createdAt', ''),
-                            'updatedAt': agent_item.get('attributes', {}).get('updatedAt', ''),
-                            'publishedAt': agent_item.get('attributes', {}).get('publishedAt', '')
-                        }
+                        profile = AgentProfile.from_api_payload(agent_item)
+                        processed_agent = profile.to_agent_dict()
                         processed_agents.append(processed_agent)
                 agents = processed_agents
         

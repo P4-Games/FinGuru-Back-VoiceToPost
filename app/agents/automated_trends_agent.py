@@ -12,6 +12,7 @@ import string
 import random
 import io
 import traceback
+import uuid
 
 # Refactored utils
 from .agent_api_utils import (
@@ -32,6 +33,8 @@ from .agent_content_utils import (
     _extract_trend_title,
     _validate_and_parse_data
 )
+from .agent_profile import AgentProfile
+from .trends_pipeline import TrendsPipeline
 
 load_env_files()
 
@@ -51,12 +54,22 @@ class AutomatedTrendsAgent:
         self.next_public_api_url = os.getenv("NEXT_PUBLIC_API_URL")
         self.sudo_api_key = os.getenv("SUDO_API_KEY")
         
-        self.agent_config = agent_config or {}
+        profile = AgentProfile.from_flat_payload(agent_config or {})
+        self.agent_config = profile.to_agent_dict()
         self.agent_id = self.agent_config.get('id')
         self.agent_name = self.agent_config.get('name', 'default-agent')
         self.personality = self.agent_config.get('personality', 'Eres un periodista especializado en tendencias de Argentina que debe crear contenido en Markdown')
         self.trending_prompt = self.agent_config.get('trending', 'Considera: - Relevancia para Argentina - Potencial de generar interés - Actualidad e importancia - Impacto social, económico o cultural')
         self.format_markdown = self.agent_config.get('format_markdown', '')
+        self.writing_style = self.agent_config.get('writing_style', 'periodistico')
+        self.tone = self.agent_config.get('tone', 'neutral')
+        self.target_audience = self.agent_config.get('target_audience', 'audiencia general argentina')
+        self.preferred_categories = self.agent_config.get('preferred_categories', [])
+        self.example_article = self.agent_config.get('example_article', '')
+        self.forbidden_topics = self.agent_config.get('forbidden_topics', [])
+        self.temperature = self.agent_config.get('temperature', 0.6)
+        self.max_tokens = self.agent_config.get('max_tokens', 1400)
+        self.pipeline_v2 = TrendsPipeline()
 
     def initialize_agents(self) -> List['AutomatedTrendsAgent']:
         """Inicializa todos los agentes disponibles con sus configuraciones únicas"""
@@ -74,27 +87,19 @@ class AutomatedTrendsAgent:
             
             for agent_data in agents_data:
                 try:
-                    format_markdown = agent_data.get('format_markdown', '')
-                    if format_markdown:
-                        format_markdown = html.unescape(format_markdown)
-                    
-                    agent_id = agent_data.get('id')
-                    agent_user_id = agent_data.get('userId')
+                    profile = AgentProfile.from_flat_payload(agent_data)
+                    agent_id = profile.id
+                    agent_user_id = profile.user_id
                     
                     if not agent_user_id:
                         print(f"No se encontró userId para el agente {agent_id}, usando ID por defecto")
                         agent_user_id = 5822
+                        profile.user_id = agent_user_id
+
+                    if profile.format_markdown:
+                        profile.format_markdown = html.unescape(profile.format_markdown)
                     
-                    agent_config = {
-                        'id': agent_id,
-                        'name': agent_data.get('name'),
-                        'personality': agent_data.get('personality', ''),
-                        'trending': agent_data.get('trending', ''),
-                        'format_markdown': format_markdown,
-                        'userId': agent_user_id,
-                        'createdAt': agent_data.get('createdAt'),
-                        'updatedAt': agent_data.get('updatedAt')
-                    }
+                    agent_config = profile.to_agent_dict()
                     
                     agent_instance = AutomatedTrendsAgent(agent_config)
                     initialized_agents.append(agent_instance)
@@ -442,7 +447,14 @@ class AutomatedTrendsAgent:
                             "agent_id": agent.agent_id,
                             "agent_name": agent.agent_name,
                             "personality": agent.personality,
-                            "trending": agent.trending_prompt
+                            "trending": agent.trending_prompt,
+                            "writing_style": agent.writing_style,
+                            "tone": agent.tone,
+                            "target_audience": agent.target_audience,
+                            "preferred_categories": agent.preferred_categories,
+                            "forbidden_topics": agent.forbidden_topics,
+                            "temperature": agent.temperature,
+                            "max_tokens": agent.max_tokens
                         }
                     
                     all_results.append(result)
@@ -642,10 +654,18 @@ TENDENCIAS ACTUALES (últimas 24h):
 📋 CRITERIOS DE SELECCIÓN:
 {self.trending_prompt}
 
+👤 PERFIL DEL AGENTE (RESPETAR):
+- Audiencia objetivo: {self.target_audience}
+- Estilo: {self.writing_style}
+- Tono: {self.tone}
+- Categorías preferidas: {', '.join(self.preferred_categories) if self.preferred_categories else 'Sin preferencias explícitas'}
+- Temas prohibidos: {', '.join(self.forbidden_topics) if self.forbidden_topics else 'Sin temas prohibidos explícitos'}
+
 🚫 REGLAS ESTRICTAS - NO VIOLAR:
 - ❌ PROHIBIDO: NO elijas tendencias marcadas con "❌ [YA SELECCIONADA - NO USAR]"
 - ❌ PROHIBIDO: NO elijas tendencias triviales (efemérides, "noches temáticas", paros sin análisis, etc.)
 - ❌ PROHIBIDO: NO elijas tendencias sobre el MISMO evento/persona/noticia específica de los artículos recientes
+- ❌ PROHIBIDO: NO elijas tendencias alineadas con temas prohibidos del perfil
 - ✅ PERMITIDO: Puedes elegir la MISMA CATEGORÍA pero con tema específico diferente
 - ✅ OBLIGATORIO: SOLO elige entre las tendencias SIN marca ❌
 - 🔍 VALIDACIÓN: Si NINGUNA tendencia cumple con criterios, responde "NO_SUITABLE_TOPIC"
@@ -716,6 +736,23 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
                     "status": "no_suitable_topic",
                     "message": "No se encontró ningún tema que cumpla con los criterios de calidad",
                     "reason": selected_reason
+                }
+
+            forbidden_hits = []
+            if selected_title:
+                selected_title_lc = selected_title.lower()
+                forbidden_hits = [
+                    topic
+                    for topic in self.forbidden_topics
+                    if isinstance(topic, str) and topic.strip() and topic.strip().lower() in selected_title_lc
+                ]
+
+            if forbidden_hits:
+                print(f"   🚫 Tema rechazado por forbidden_topics: {forbidden_hits}")
+                return {
+                    "status": "no_suitable_topic",
+                    "message": "Tema rechazado por restricciones del perfil del agente",
+                    "reason": f"Coincide con forbidden_topics: {', '.join(forbidden_hits)}"
                 }
             
             if selected_position in self._selected_positions_session or selected_title in self._selected_trends_session:
@@ -887,6 +924,92 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
             print(error_msg)
             return {"status": "error", "message": error_msg}
 
+    def run_automated_process_with_shared_trends_v2(
+        self,
+        shared_trends_data: Dict[str, Any],
+        topic_position: int = None,
+        dry_run: bool = False,
+        correlation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Ejecuta pipeline v2 desacoplado con respuesta estructurada y trazabilidad."""
+        return self.pipeline_v2.execute(
+            agent=self,
+            trends_data=shared_trends_data,
+            topic_position=topic_position,
+            dry_run=dry_run,
+            correlation_id=correlation_id,
+        )
+
+    def run_multi_agent_process_v2(
+        self,
+        topic_position: int = None,
+        dry_run: bool = False,
+        request_correlation_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Ejecuta múltiples agentes bajo el contrato v2 con trazabilidad por ejecución."""
+        try:
+            request_correlation_id = request_correlation_id or str(uuid.uuid4())
+            print(f"[{datetime.now()}] Iniciando proceso multi-agente v2 (correlation_id={request_correlation_id})...")
+
+            self._selected_trends_session.clear()
+            self._selected_positions_session.clear()
+
+            shared_trends_data = self.get_trending_topics()
+            if shared_trends_data.get("status") != "success" or not shared_trends_data.get("trending_topics"):
+                return {
+                    "status": "error",
+                    "contract_version": "v2",
+                    "correlation_id": request_correlation_id,
+                    "message": "No se pudieron obtener tendencias compartidas",
+                }
+
+            agents = self.initialize_agents()
+            if not agents:
+                return {
+                    "status": "error",
+                    "contract_version": "v2",
+                    "correlation_id": request_correlation_id,
+                    "message": "No se pudieron inicializar agentes",
+                }
+
+            results = []
+            for agent in agents:
+                agent_correlation_id = f"{request_correlation_id}:{agent.agent_id}"
+                result = agent.run_automated_process_with_shared_trends_v2(
+                    shared_trends_data=shared_trends_data,
+                    topic_position=topic_position,
+                    dry_run=dry_run,
+                    correlation_id=agent_correlation_id,
+                )
+                results.append(result)
+
+            successful = [r for r in results if r.get("status") == "success"]
+            skipped = [r for r in results if r.get("status") == "skipped"]
+            failed = [r for r in results if r.get("status") == "error"]
+
+            return {
+                "status": "success",
+                "contract_version": "v2",
+                "correlation_id": request_correlation_id,
+                "timestamp": datetime.now().isoformat(),
+                "execution": {
+                    "topic_position": topic_position,
+                    "dry_run": dry_run,
+                    "agents_total": len(results),
+                    "successful": len(successful),
+                    "skipped": len(skipped),
+                    "failed": len(failed),
+                },
+                "results": results,
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "contract_version": "v2",
+                "correlation_id": request_correlation_id or "unknown",
+                "message": f"Error general en proceso multi-agente v2: {str(e)}",
+            }
+
 def run_trends_agent(topic_position: int = None):
     agent = AutomatedTrendsAgent()
     return agent.run_automated_process(topic_position)
@@ -894,6 +1017,19 @@ def run_trends_agent(topic_position: int = None):
 def run_multi_trends_agents(topic_position: int = None):
     coordinator = AutomatedTrendsAgent()
     return coordinator.run_multi_agent_process(topic_position)
+
+
+def run_multi_trends_agents_v2(
+    topic_position: int = None,
+    dry_run: bool = False,
+    correlation_id: Optional[str] = None,
+):
+    coordinator = AutomatedTrendsAgent()
+    return coordinator.run_multi_agent_process_v2(
+        topic_position=topic_position,
+        dry_run=dry_run,
+        request_correlation_id=correlation_id,
+    )
 
 def get_available_agents_standalone():
     agent = AutomatedTrendsAgent()
