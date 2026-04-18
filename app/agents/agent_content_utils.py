@@ -4,7 +4,7 @@ import html
 import string
 import random
 import hashlib
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import unicodedata
 
 # LISTA DE PATRONES TEMÁTICOS A EXCLUIR (contextuales, triviales, sin valor investigativo)
@@ -71,6 +71,19 @@ DEEP_ANALYSIS_KEYWORDS = {
     'evidencia', 'datos', 'cifras', 'estadísticas', 'estudio', 'investigación',
     'encuesta', 'informe', 'análisis', 'conclusión', 'resultado'
 }
+
+
+FORBIDDEN_VAGUE_PHRASES = [
+    "en el dinámico mundo de hoy",
+    "es fundamental destacar",
+    "un futuro incierto",
+    "exploraremos",
+]
+
+MIN_REQUIRED_NUMERIC_EVIDENCES = 3
+MIN_REQUIRED_ANALYSIS_SECTIONS = 4
+MIN_REQUIRED_SUBSTANTIVE_PARAGRAPHS = 4
+MIN_PARAGRAPH_WORDS = 70
 
 
 def _build_profile_directives(writing_style: str, tone: str, target_audience: str) -> str:
@@ -227,6 +240,44 @@ def _normalize_title_capitalization(title: str) -> str:
     
     return ' '.join(result)
 
+
+def _normalize_text_for_matching(text: str) -> str:
+    """Normaliza texto para comparar frases sin depender de acentos o mayúsculas."""
+    if not isinstance(text, str):
+        return ""
+
+    normalized = unicodedata.normalize("NFD", text)
+    normalized = "".join(char for char in normalized if unicodedata.category(char) != "Mn")
+    return normalized.lower()
+
+
+def _extract_numeric_evidences(text: str) -> List[str]:
+    """Extrae números con contexto financiero básico (%, $, miles, millones, etc.)."""
+    if not isinstance(text, str) or not text.strip():
+        return []
+
+    pattern = re.compile(
+        r'(?:\$\s*)?\d{1,3}(?:[\.,]\d{3})*(?:[\.,]\d+)?\s*(?:%|usd|ars|mil|millones|m|b|k)?',
+        re.IGNORECASE,
+    )
+
+    evidences = []
+    for match in pattern.findall(text):
+        candidate = re.sub(r'\s+', ' ', str(match)).strip()
+        # Filtramos capturas sin valor numérico real
+        if candidate and re.search(r'\d', candidate):
+            evidences.append(candidate.lower())
+
+    unique = []
+    seen = set()
+    for item in evidences:
+        if item in seen:
+            continue
+        seen.add(item)
+        unique.append(item)
+
+    return unique
+
 def _validate_article_depth(article_content: str) -> Dict[str, Any]:
     """Valida que el artículo sea análisis profundo, no cobertura superficial.
     Versión mejorada con:
@@ -238,25 +289,27 @@ def _validate_article_depth(article_content: str) -> Dict[str, Any]:
     Retorna {'is_valid': bool, 'issues': [list], 'depth_score': float}"""
     
     content_lower = article_content.lower()
+    content_normalized = _normalize_text_for_matching(article_content)
     issues = []
     depth_score = 0.0
-    
-    # 1. ANÁLISIS KEYWORDS - Peso aumentado de 30 a 50 puntos
+
+    # 1. ANÁLISIS KEYWORDS - Peso máximo 45
     has_analysis_keywords = sum(1 for keyword in DEEP_ANALYSIS_KEYWORDS if keyword in content_lower)
-    # Más keywords = mayor puntuación, máx 50 puntos (3 puntos por keyword)
-    analysis_score = min(has_analysis_keywords * 3, 50)
+    analysis_score = min(has_analysis_keywords * 2.5, 45)
     depth_score += analysis_score
-    
-    # 2. MÚLTIPLES SECCIONES - 25 puntos si tiene 3+ secciones
+
+    # 2. MÚLTIPLES SECCIONES DE VALOR - Peso máximo 25
     section_count = len(re.findall(r'^##\s+', article_content, re.MULTILINE))
-    has_multiple_sections = section_count >= 3
+    has_multiple_sections = section_count >= MIN_REQUIRED_ANALYSIS_SECTIONS
     depth_score += 25 if has_multiple_sections else 0
-    
-    # 3. ESTADÍSTICAS Y DATOS - 20 puntos si contiene números/cifras
-    has_statistics = bool(re.search(r'\d+(%|\$|M|B|k|mil|millones|%)?(?:\s|:|\.|-|,|$)', article_content))
-    depth_score += 20 if has_statistics else 0
-    
-    # 4. CONTEXTO Y EVIDENCIA - 15 puntos
+
+    # 3. ESTADÍSTICAS Y DATOS - Conteo real de evidencias numéricas únicas
+    numeric_evidences = _extract_numeric_evidences(article_content)
+    numeric_evidence_count = len(numeric_evidences)
+    has_statistics = numeric_evidence_count >= MIN_REQUIRED_NUMERIC_EVIDENCES
+    depth_score += min(numeric_evidence_count * 4, 20)
+
+    # 4. CONTEXTO Y EVIDENCIA - Peso máximo 15
     has_context = bool(re.search(
         r'(según|informó|reportó|indicó|reveló|demostró|mostró|evidencia|'
         r'datos muestran|estudios demuestran|investigación|estudio|encuesta|'
@@ -264,51 +317,65 @@ def _validate_article_depth(article_content: str) -> Dict[str, Any]:
         content_lower
     ))
     depth_score += 15 if has_context else 0
-    
-    # 5. PÁRRAFOS SUSTANCIALES - Mejorado: mínimo 70 palabras, no 50
-    # Divide el contenido en párrafos "reales" (con mínimo 70 palabras)
+
+    # 5. PÁRRAFOS SUSTANCIALES
     paragraphs = []
     for para in article_content.split('\n\n'):
         para_clean = para.strip()
-        # Excluir líneas de encabezado, listas cortas, etc.
         if not para_clean.startswith('#') and not para_clean.startswith('-'):
             word_count = len(para_clean.split())
-            # Solo contar párrafos de 70+ palabras como "sustanciales"
-            if word_count >= 70:
+            if word_count >= MIN_PARAGRAPH_WORDS:
                 paragraphs.append(para_clean)
-    
+
     paragraph_count = len(paragraphs)
-    # Máximo 10 puntos por párrafos sustanciales (mínimo 4 de 70+ palabras)
-    depth_score += min(max(paragraph_count - 3, 0) * 2, 10)
-    
-    # 6. VALIDACIONES Y PUNTUACIÓN FINAL
-    
-    # Validación 1: Profundidad total
-    if depth_score < 50:
+    depth_score += min(max(paragraph_count - (MIN_REQUIRED_SUBSTANTIVE_PARAGRAPHS - 1), 0) * 2, 10)
+
+    # 6. FRASES VAGAS PROHIBIDAS
+    forbidden_phrase_hits = []
+    for phrase in FORBIDDEN_VAGUE_PHRASES:
+        phrase_normalized = _normalize_text_for_matching(phrase)
+        if phrase_normalized and phrase_normalized in content_normalized:
+            forbidden_phrase_hits.append(phrase)
+
+    if forbidden_phrase_hits:
+        depth_score -= min(len(forbidden_phrase_hits) * 15, 30)
+
+    # 7. VALIDACIONES
+    if depth_score < 60:
         issues.append(f"Profundidad baja ({depth_score:.0f}/100): falta análisis profundo")
-    
-    # Validación 2: Análisis keywords
+
     if has_analysis_keywords < 8:
         issues.append(f"Análisis insuficiente: solo {has_analysis_keywords} palabras clave de análisis (mín 8)")
-    
-    # Validación 3: Párrafos sustanciales
-    if paragraph_count < 4:
-        issues.append(f"Desarrollo insuficiente: solo {paragraph_count} párrafos sustanciales (mín 4 de 70+ palabras)")
-    
-    # Validación 4: Múltiples secciones
+
+    if paragraph_count < MIN_REQUIRED_SUBSTANTIVE_PARAGRAPHS:
+        issues.append(
+            f"Desarrollo insuficiente: solo {paragraph_count} párrafos sustanciales "
+            f"(mín {MIN_REQUIRED_SUBSTANTIVE_PARAGRAPHS} de {MIN_PARAGRAPH_WORDS}+ palabras)"
+        )
+
     if not has_multiple_sections:
-        issues.append(f"Estructura débil: solo {section_count} secciones (mín 3)")
-    
-    # Validación 5: Datos/estadísticas
+        issues.append(
+            f"Estructura débil: solo {section_count} secciones de análisis "
+            f"(mín {MIN_REQUIRED_ANALYSIS_SECTIONS})"
+        )
+
     if not has_statistics:
-        issues.append("Falta respaldo empírico: sin datos, cifras o estadísticas")
-    
-    # Validación 6: Contexto/Evidencia
+        issues.append(
+            f"Falta respaldo empírico: {numeric_evidence_count} cifras detectadas "
+            f"(mín {MIN_REQUIRED_NUMERIC_EVIDENCES})"
+        )
+
     if not has_context:
         issues.append("Sin fuentes o contexto verificable")
-    
-    is_valid = len(issues) == 0 and depth_score >= 50
-    
+
+    if forbidden_phrase_hits:
+        issues.append(
+            "Contiene frases vagas prohibidas: "
+            + ", ".join(f'"{hit}"' for hit in forbidden_phrase_hits)
+        )
+
+    is_valid = len(issues) == 0 and depth_score >= 60
+
     return {
         'is_valid': is_valid,
         'issues': issues,
@@ -317,9 +384,12 @@ def _validate_article_depth(article_content: str) -> Dict[str, Any]:
         'section_count': section_count,
         'has_multiple_sections': has_multiple_sections,
         'has_statistics': has_statistics,
+        'numeric_evidence_count': numeric_evidence_count,
+        'numeric_evidences': numeric_evidences[:12],
         'has_context': has_context,
         'substantive_paragraph_count': paragraph_count,
-        'analysis_score': analysis_score
+        'analysis_score': analysis_score,
+        'forbidden_phrase_hits': forbidden_phrase_hits,
     }
 
 def _convert_html_to_markdown(html_content: str) -> str:
@@ -373,6 +443,125 @@ def _convert_html_to_markdown(html_content: str) -> str:
     md = md.strip()
     
     return md
+
+
+def _format_quote_value(value: Any) -> str:
+    try:
+        if value is None or value == "":
+            return "N/D"
+        return f"${float(value):,.2f}"
+    except (TypeError, ValueError):
+        return "N/D"
+
+
+def _build_related_context_block(search_results: Dict[str, Any]) -> str:
+    related_context = search_results.get("related_context", {}) if isinstance(search_results, dict) else {}
+    if not isinstance(related_context, dict):
+        return ""
+
+    related_queries = related_context.get("related_queries", [])
+    related_topics = related_context.get("related_topics", [])
+
+    if not related_queries and not related_topics:
+        return ""
+
+    lines = ["CONTEXTO RELACIONADO DEL TREND (SERPAPI):"]
+
+    if related_queries:
+        lines.append("- Related queries:")
+        for item in related_queries[:6]:
+            if isinstance(item, dict):
+                term = item.get("term", "").strip()
+                value = item.get("formatted_value") or item.get("value")
+                if term:
+                    suffix = f" ({value})" if value not in (None, "") else ""
+                    lines.append(f"  • {term}{suffix}")
+            elif isinstance(item, str) and item.strip():
+                lines.append(f"  • {item.strip()}")
+
+    if related_topics:
+        lines.append("- Related topics:")
+        for item in related_topics[:6]:
+            if isinstance(item, dict):
+                term = item.get("term", "").strip()
+                value = item.get("formatted_value") or item.get("value")
+                if term:
+                    suffix = f" ({value})" if value not in (None, "") else ""
+                    lines.append(f"  • {term}{suffix}")
+            elif isinstance(item, str) and item.strip():
+                lines.append(f"  • {item.strip()}")
+
+    lines.append("- Usa este contexto para conectar causas, actores y consecuencias en el análisis.")
+    return "\n".join(lines)
+
+
+def _build_market_data_block(search_results: Dict[str, Any]) -> str:
+    market_data = search_results.get("market_data", {}) if isinstance(search_results, dict) else {}
+    if not isinstance(market_data, dict) or market_data.get("status") != "success":
+        return ""
+
+    quotes = market_data.get("quotes", {})
+    if not isinstance(quotes, dict) or not quotes:
+        return ""
+
+    lines = ["COTIZACIONES ARGENTINA (INYECTOR DE DATOS DUROS):"]
+    quote_order = [
+        ("dolar_blue", "Dólar Blue"),
+        ("dolar_mep", "Dólar MEP"),
+        ("dolar_ccl", "Dólar CCL"),
+    ]
+
+    for quote_key, quote_label in quote_order:
+        quote_payload = quotes.get(quote_key, {})
+        if not isinstance(quote_payload, dict):
+            continue
+
+        bid = _format_quote_value(quote_payload.get("bid"))
+        ask = _format_quote_value(quote_payload.get("ask"))
+        last = _format_quote_value(quote_payload.get("last"))
+        source = quote_payload.get("source", market_data.get("source", "desconocida"))
+
+        lines.append(
+            f"- {quote_label}: compra {bid} | venta {ask} | ref {last} | fuente: {source}"
+        )
+
+    timestamp = market_data.get("timestamp")
+    if timestamp:
+        lines.append(f"- Timestamp snapshot: {timestamp}")
+
+    lines.append(
+        "- Debes citar al menos 3 cifras de este bloque cuando el tema tenga impacto económico/financiero."
+    )
+    return "\n".join(lines)
+
+
+def _build_internal_links_block(search_results: Dict[str, Any]) -> str:
+    internal_links = search_results.get("internal_links", []) if isinstance(search_results, dict) else []
+    if not isinstance(internal_links, list) or not internal_links:
+        return ""
+
+    lines = ["ENLACES INTERNOS DISPONIBLES (FIN.GURU):"]
+    valid_count = 0
+    for item in internal_links[:5]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "")).strip()
+        url = str(item.get("url", "")).strip()
+        category = str(item.get("category", "")).strip()
+        if not title or not url:
+            continue
+
+        category_suffix = f" [{category}]" if category else ""
+        lines.append(f"- {title}{category_suffix}: {url}")
+        valid_count += 1
+
+    if valid_count == 0:
+        return ""
+
+    lines.append(
+        "- Incluye 1 o 2 enlaces internos relevantes dentro del cuerpo usando Markdown: [texto](url)."
+    )
+    return "\n".join(lines)
 
 def create_prompt(agent, trends_data: Dict[str, Any], search_results: Dict[str, Any], selected_trend: str, topic_position: int = None) -> str:
     """Crea el prompt para ChatGPT basado en las tendencias y búsquedas"""
@@ -448,6 +637,18 @@ def create_prompt(agent, trends_data: Dict[str, Any], search_results: Dict[str, 
                 if len(snippet) > 100:
                     snippet = snippet[:97] + "..."
                 additional_info += f"{i}. [Pos. {position}] {title}\n   {snippet}\n"
+
+    related_context_block = _build_related_context_block(search_results)
+    if related_context_block:
+        additional_info += "\n" + related_context_block + "\n"
+
+    market_data_block = _build_market_data_block(search_results)
+    if market_data_block:
+        additional_info += "\n" + market_data_block + "\n"
+
+    internal_links_block = _build_internal_links_block(search_results)
+    if internal_links_block:
+        additional_info += "\n" + internal_links_block + "\n"
     
     personality = agent.personality
     trending_instructions = agent.trending_prompt
@@ -546,7 +747,7 @@ CATEGORÍAS DISPONIBLES (debes elegir UNA):
 FinGuru publica SOLO análisis profundo de investigación. Tu artículo SERÁ VALIDADO 
 automáticamente y RECHAZADO si:
   ❌ Tiene menos de 4 secciones principales
-  ❌ Tiene menos de 1500 palabras totales
+    ❌ Tiene menos de 4 párrafos sustanciales de análisis
   ❌ Tiene párrafos menores a 70 palabras
   ❌ Tiene menos de 5 palabras clave de análisis (análisis, impacto, contexto, estrategia, etc)
   ❌ No incluye mínimo 5 datos, cifras o estadísticas específicas
@@ -603,6 +804,7 @@ DATOS Y CIFRAS (MÍNIMO 5):
 ✓ Comparativas numéricas (ej: "50% más que en 2023")
 ✓ Datos internacionales (ej: "en Brasil alcanzó X, mientras que en Argentina Y")
 ✓ Históricos (ej: "a diferencia de 2019 cuando fue 20%")
+✓ Si recibes cotizaciones de mercado (Blue/MEP/CCL), incluye al menos 3 valores concretos
 ✓ NO números genéricos, TODOS con contexto y fuente
 
 ANÁLISIS PROFUNDO:
@@ -651,7 +853,7 @@ Párrafos Sustanciales:
 • Datos con fuente: "según BCRA, las reservas cayeron X%"
 • Conclusión con outlook estratégico
 • Comparación explícita internacional
-• Artículos de 1500+ palabras
+• Secciones de valor con evidencia concreta
 • Mínimo 8 palabras clave de análisis distribuidas
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -662,12 +864,12 @@ Párrafos Sustanciales:
 2. PROFUNDIDAD: Cada sección 80-120 palabras, 4+ datos/cifras, comparación internacional
 3. ANÁLISIS: Incluye causas, contexto, impacto, perspectiva futura
 4. PALABRAS CLAVE: Usa naturalmente análisis, impacto, contexto, estrategia, comparación, etc.
-5. TOTAL: 1500+ palabras con múltiples datos y cifras
+5. VALOR: prioriza densidad analítica y datos verificables por sección
 6. FORMATO: Solo Markdown, línea 1 = título, línea 2 = categoría
 7. VALIDACIÓN: Tu artículo pasará por análisis de profundidad automático - cumple todo
 
 RECUERDA: Si tu artículo no cumple estos requisitos, será RECHAZADO automáticamente.
-Tu misión es generar análisis profundo de 1500+ palabras con mínimo 5 datos/cifras,
+Tu misión es generar análisis profundo con mínimo 5 datos/cifras,
 comparación internacional, y múltiples secciones temáticas. NO cobertura de noticias.
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -756,7 +958,7 @@ TONO Y ESTILO:
 ✓ Evitar exageraciones, mantener rigor analítico
 
 FORMATO FINAL:
-✓ 1200-1400 palabras en total (no 1100-1200, necesitas más desarrollo)
+✓ Prioriza profundidad por secciones y evidencia (no relleno por conteo de palabras)
 ✓ Responde ÚNICAMENTE con el Markdown
 ✓ SIN explicaciones adicionales antes o después
 ✓ SIN "CATEGORÍA: [...]" dentro del artículo (agrégalo como comentario HTML o en segunda línea)
@@ -784,7 +986,34 @@ POR QUÉ algo importa, NO simplemente QUÉ pasó.
 
 ═══════════════════════════════════════════════════════════════════════════"""
 
-    return prompt
+    blacklist_lines = "\n".join([f"- \"{phrase}\"" for phrase in FORBIDDEN_VAGUE_PHRASES])
+    final_quality_block = f"""
+
+═══════════════════════════════════════════════════════════════════════════
+
+🔒 BLOQUE DE CONTROL FINAL (ESTE BLOQUE ANULA REGLAS PREVIAS EN CONFLICTO)
+
+REGLAS UNIFICADAS:
+- No priorices cantidad de palabras. Prioriza valor por secciones.
+- Estructura mínima: 1 introducción + {MIN_REQUIRED_ANALYSIS_SECTIONS} secciones analíticas (##).
+- Mínimo {MIN_REQUIRED_SUBSTANTIVE_PARAGRAPHS} párrafos sustanciales de {MIN_PARAGRAPH_WORDS}+ palabras.
+- Mínimo {MIN_REQUIRED_NUMERIC_EVIDENCES} cifras distintas, con contexto.
+- Si se incluye bloque de cotizaciones Blue/MEP/CCL, cita al menos 3 valores concretos.
+- Debes incluir 1 o 2 enlaces internos de FinGuru si el bloque de enlaces internos está disponible.
+
+FRASES PROHIBIDAS (NO USAR):
+{blacklist_lines}
+
+FORMATO DE SALIDA OBLIGATORIO:
+- Solo Markdown.
+- Línea 1: # Título
+- Línea 2: **CATEGORÍA:** [una de las categorías permitidas]
+- Sin prólogos tipo "exploraremos" ni relleno retórico.
+
+═══════════════════════════════════════════════════════════════════════════
+"""
+
+    return prompt + final_quality_block
 
 def generate_article_content(agent, prompt: str) -> str:
     """Genera el contenido del artículo usando ChatGPT con parámetros optimizados.
@@ -837,15 +1066,50 @@ def markdown_to_html(md: str) -> str:
     
     return html
 
-def process_article_data(agent_response: str) -> Dict[str, Any]:
+
+def _slugify(text: str) -> str:
+    if not isinstance(text, str) or not text.strip():
+        return "articulo-finguru"
+
+    normalized = unicodedata.normalize("NFD", text)
+    normalized = "".join(char for char in normalized if unicodedata.category(char) != "Mn")
+    normalized = normalized.lower()
+    normalized = re.sub(r'[^a-z0-9\s-]', '', normalized)
+    normalized = re.sub(r'\s+', '-', normalized).strip('-')
+    normalized = re.sub(r'-{2,}', '-', normalized)
+    return normalized[:90] if normalized else "articulo-finguru"
+
+
+def _build_tags(category: str, selected_trend: str) -> str:
+    base_tags = ["argentina", "finguru"]
+    category_token = (category or "").strip().lower()
+    if category_token:
+        base_tags.append(category_token)
+
+    trend_tokens = []
+    for token in re.findall(r"[a-zA-ZáéíóúÁÉÍÓÚñÑ0-9]+", selected_trend or ""):
+        cleaned = token.lower()
+        if len(cleaned) >= 4:
+            trend_tokens.append(cleaned)
+
+    for token in trend_tokens[:3]:
+        if token not in base_tags:
+            base_tags.append(token)
+
+    return ", ".join(base_tags)
+
+
+def process_article_data(
+    agent_response: str,
+    selected_trend: str = "",
+    search_results: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Procesa la respuesta del agente para la API de fin.guru.
-    Incluye normalización de capitalización de títulos."""
+    Incluye normalización de título y metadata SEO base."""
     lines = agent_response.split('\n')
     
     title_line = next((line for line in lines if line.startswith('# ')), None)
     title = title_line.replace('# ', '').strip() if title_line else 'Artículo de Tendencia'
-    
-    # Normalizar capitalización del título (solo 1ª letra mayúscula + nombres propios)
     title = _normalize_title_capitalization(title)
     
     category_line = next((line for line in lines if '**CATEGORÍA:**' in line or 'CATEGORÍA:' in line), None)
@@ -861,23 +1125,55 @@ def process_article_data(agent_response: str) -> Dict[str, Any]:
     clean_markdown = re.sub(r'^# .*?\n', '', clean_markdown, count=1)
     clean_markdown = clean_markdown.strip()
     
-    paragraphs = [line.strip() for line in clean_markdown.split('\n') 
-                 if line.strip() and not line.startswith('#') and not line.startswith('-')]
-    excerpt = paragraphs[0][:150] + '...' if paragraphs else 'Artículo sobre tendencias'
-    
+    paragraphs = [
+        line.strip()
+        for line in clean_markdown.split('\n')
+        if line.strip() and not line.startswith('#') and not line.startswith('-')
+    ]
+    excerpt = paragraphs[0][:180] + '...' if paragraphs else 'Artículo sobre tendencias'
+
+    slug = _slugify(title)
+    meta_description = excerpt[:160]
+    image_alt_text = f"{title} - análisis FinGuru"
+
+    internal_links = []
+    if isinstance(search_results, dict):
+        raw_links = search_results.get("internal_links", [])
+        if isinstance(raw_links, list):
+            for item in raw_links[:5]:
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url", "")).strip()
+                link_title = str(item.get("title", "")).strip()
+                if url and link_title:
+                    internal_links.append(
+                        {
+                            "title": link_title,
+                            "url": url,
+                            "category": item.get("category", ""),
+                        }
+                    )
+
     html_content = markdown_to_html(clean_markdown)
-    
     filename = ''.join(random.choices(string.ascii_lowercase + string.digits, k=10)) + '.jpg'
-    
+    tags = _build_tags(category, selected_trend)
+
     return {
         "title": title,
         "excerpt": excerpt,
         "content": html_content,
         "category": category,
         "publishAs": "",
-        "tags": "argentina, tendencias, noticias",
+        "tags": tags,
         "detectedCategory": category,
-        "fileName": filename
+        "fileName": filename,
+        "seo_metadata": {
+            "slug": slug,
+            "meta_description": meta_description,
+            "image_alt_text": image_alt_text,
+            "focus_trend": selected_trend,
+        },
+        "internal_links": internal_links,
     }
 
 def _validate_and_parse_data(data: Any, data_type: str = "unknown") -> Dict[str, Any]:

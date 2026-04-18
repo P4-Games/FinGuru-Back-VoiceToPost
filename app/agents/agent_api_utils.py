@@ -4,6 +4,12 @@ import io
 from typing import Dict, Any, Optional
 from .agent_profile import AgentProfile
 
+
+def _build_article_url(slug: str) -> str:
+    if not slug:
+        return ""
+    return f"https://fin.guru/{slug}"
+
 def get_available_agents(agent) -> Dict[str, Any]:
     """Obtiene todos los agentes disponibles desde la API"""
     try:
@@ -65,12 +71,22 @@ def get_available_agents(agent) -> Dict[str, Any]:
             'details': [],'total': 0
         }
 
-def get_agent_recent_articles(user_id: int) -> Dict[str, Any]:
-    """Obtiene los últimos 2 artículos del agente para evitar repetir temas"""
+def get_agent_recent_articles(user_id: int, limit: int = 2) -> Dict[str, Any]:
+    """Obtiene artículos recientes del agente para evitar repetir temas y habilitar enlazado interno."""
     try:
-        print(f"Obteniendo últimos artículos del agente (User ID: {user_id})...")
+        limit = max(1, min(10, int(limit)))
+        print(f"Obteniendo últimos {limit} artículos del agente (User ID: {user_id})...")
         
-        endpoint = f"https://backend.fin.guru/api/articles?filters[author][id][$eq]={user_id}&sort=createdAt:desc&pagination[limit]=2&fields[0]=title&fields[1]=excerpt&populate=category"
+        endpoint = (
+            "https://backend.fin.guru/api/articles"
+            f"?filters[author][id][$eq]={user_id}"
+            "&sort=createdAt:desc"
+            f"&pagination[limit]={limit}"
+            "&fields[0]=title"
+            "&fields[1]=excerpt"
+            "&fields[2]=slug"
+            "&populate=category"
+        )
         
         headers = {
             "Content-Type": "application/json",
@@ -100,6 +116,8 @@ def get_agent_recent_articles(user_id: int) -> Dict[str, Any]:
                         'id': article.get('id'),
                         'title': attr.get('title', ''),
                         'excerpt': attr.get('excerpt', ''),
+                        'slug': attr.get('slug', ''),
+                        'url': _build_article_url(attr.get('slug', '')),
                         'category': category_name,
                         'createdAt': attr.get('createdAt', '')
                     })
@@ -148,7 +166,7 @@ def get_all_agents_recent_articles(agent, limit_per_agent: int = 2) -> Dict[str,
                 
                 print(f"   Obteniendo artículos del agente: {agent_name} (UserID: {user_id})")
                 
-                agent_articles = get_agent_recent_articles(user_id)
+                agent_articles = get_agent_recent_articles(user_id, limit=limit_per_agent)
                 
                 if agent_articles.get("status") == "success" and agent_articles.get("articles"):
                     articles = agent_articles.get("articles", [])
@@ -198,6 +216,69 @@ def get_all_agents_recent_articles(agent, limit_per_agent: int = 2) -> Dict[str,
             "status": "error",
             "message": str(e),
             "articles": []
+        }
+
+
+def get_recent_finguru_articles(limit: int = 5) -> Dict[str, Any]:
+    """Obtiene últimas notas globales de FinGuru para enlazado interno en nuevas piezas."""
+    try:
+        limit = max(1, min(20, int(limit)))
+        endpoint = (
+            "https://backend.fin.guru/api/articles"
+            "?sort=createdAt:desc"
+            f"&pagination[limit]={limit}"
+            "&fields[0]=title"
+            "&fields[1]=excerpt"
+            "&fields[2]=slug"
+            "&populate=category"
+        )
+
+        response = requests.get(endpoint, headers={"Content-Type": "application/json"})
+        response.raise_for_status()
+
+        payload = response.json()
+        items = payload.get("data", []) if isinstance(payload, dict) else []
+        articles = []
+
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+
+            attr = item.get("attributes", {})
+            if not isinstance(attr, dict):
+                continue
+
+            slug = attr.get("slug", "")
+
+            category_name = ""
+            category_data = attr.get("category", {})
+            if isinstance(category_data, dict) and "data" in category_data:
+                category_attrs = category_data.get("data", {}).get("attributes", {})
+                if isinstance(category_attrs, dict):
+                    category_name = category_attrs.get("name", "")
+
+            articles.append(
+                {
+                    "id": item.get("id"),
+                    "title": attr.get("title", ""),
+                    "excerpt": attr.get("excerpt", ""),
+                    "slug": slug,
+                    "url": _build_article_url(slug),
+                    "category": category_name,
+                    "createdAt": attr.get("createdAt", ""),
+                }
+            )
+
+        return {
+            "status": "success",
+            "total": len(articles),
+            "articles": articles,
+        }
+    except Exception as exc:
+        return {
+            "status": "error",
+            "message": str(exc),
+            "articles": [],
         }
 
 def search_google_news(agent, query: str) -> Dict[str, Any]:

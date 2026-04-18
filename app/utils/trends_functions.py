@@ -2,6 +2,7 @@ from datetime import datetime
 import os
 from dotenv import load_dotenv
 from serpapi import GoogleSearch
+from typing import Any, Dict, List
 
 class TrendsAPI:
     def __init__(self):
@@ -9,6 +10,18 @@ class TrendsAPI:
         self.api_key = os.getenv("SERPAPI_KEY")
         self.api_key2 = os.getenv("SERPAPI_KEY2")
         self.current_key_index = 0 
+        self.enable_related_context = self._is_truthy_env(
+            os.getenv("ENABLE_SERPAPI_RELATED_CONTEXT", "true")
+        )
+        self.related_cache_ttl_seconds = max(
+            60,
+            int(os.getenv("RELATED_TRENDS_CACHE_TTL_SECONDS", "1200"))
+        )
+        self.related_items_limit = max(
+            3,
+            min(12, int(os.getenv("RELATED_TRENDS_ITEMS_LIMIT", "6")))
+        )
+        self._related_context_cache: Dict[str, Dict[str, Any]] = {}
 
     def get_trending_searches_by_category(self, geo='AR', hours=24, language="es-419", no_cache=False, count=16):
         """
@@ -181,3 +194,197 @@ class TrendsAPI:
         """Resetea el índice para usar la clave primaria"""
         self.current_key_index = 0
         print("🔄 Reseteado a SERPAPI_KEY (clave primaria)")
+
+    @staticmethod
+    def _is_truthy_env(value: str) -> bool:
+        return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def get_related_trend_context(
+        self,
+        query: str,
+        geo: str = "AR",
+        language: str = "es-419",
+        force_refresh: bool = False,
+    ) -> Dict[str, Any]:
+        """Obtiene consultas y temas relacionados del trend seleccionado.
+
+        Se consulta el engine google_trends con data_type RELATED_QUERIES y
+        RELATED_TOPICS para enriquecer el contexto editorial antes de redactar.
+        """
+        normalized_query = (query or "").strip()
+        if not normalized_query:
+            return {
+                "status": "error",
+                "message": "Query vacía para contexto relacionado",
+                "query": "",
+                "related_queries": [],
+                "related_topics": [],
+            }
+
+        if not self.enable_related_context:
+            return {
+                "status": "disabled",
+                "message": "Contexto relacionado deshabilitado por configuración",
+                "query": normalized_query,
+                "related_queries": [],
+                "related_topics": [],
+            }
+
+        cache_key = f"{geo}:{language}:{normalized_query.lower()}"
+        now = datetime.now()
+
+        if not force_refresh and cache_key in self._related_context_cache:
+            cached = self._related_context_cache[cache_key]
+            cached_at = cached.get("cached_at")
+            if isinstance(cached_at, datetime):
+                age_seconds = (now - cached_at).total_seconds()
+                if age_seconds < self.related_cache_ttl_seconds:
+                    cached_payload = dict(cached.get("payload", {}))
+                    cached_payload["cache_hit"] = True
+                    return cached_payload
+
+        current_key = self._get_current_api_key()
+        if not current_key:
+            return {
+                "status": "error",
+                "message": "No hay claves API válidas disponibles",
+                "query": normalized_query,
+                "related_queries": [],
+                "related_topics": [],
+            }
+
+        related_queries = self._fetch_related_items(
+            query=normalized_query,
+            geo=geo,
+            language=language,
+            data_type="RELATED_QUERIES",
+            api_key=current_key,
+        )
+        related_topics = self._fetch_related_items(
+            query=normalized_query,
+            geo=geo,
+            language=language,
+            data_type="RELATED_TOPICS",
+            api_key=current_key,
+        )
+
+        status = "success" if (related_queries or related_topics) else "empty"
+        payload = {
+            "status": status,
+            "query": normalized_query,
+            "timestamp": now.isoformat(),
+            "geo": geo,
+            "related_queries": related_queries[: self.related_items_limit],
+            "related_topics": related_topics[: self.related_items_limit],
+            "source": "serpapi_google_trends",
+            "cache_hit": False,
+        }
+
+        self._related_context_cache[cache_key] = {
+            "cached_at": now,
+            "payload": payload,
+        }
+
+        return payload
+
+    def _fetch_related_items(
+        self,
+        query: str,
+        geo: str,
+        language: str,
+        data_type: str,
+        api_key: str,
+    ) -> List[Dict[str, Any]]:
+        try:
+            params = {
+                "engine": "google_trends",
+                "q": query,
+                "geo": geo,
+                "hl": language,
+                "data_type": data_type,
+                "api_key": api_key,
+            }
+            response = GoogleSearch(params).get_dict()
+            if "error" in response:
+                print(f"⚠️ Error obteniendo {data_type} para '{query}': {response.get('error')}")
+                return []
+            return self._extract_related_entries(response, data_type)
+        except Exception as exc:
+            print(f"⚠️ Excepción en {data_type} para '{query}': {str(exc)}")
+            return []
+
+    def _extract_related_entries(self, response: Dict[str, Any], data_type: str) -> List[Dict[str, Any]]:
+        raw_items: List[Any] = []
+
+        container_keys = ["related_queries", "related_topics", "rising", "top"]
+        for key in container_keys:
+            value = response.get(key)
+            if isinstance(value, list):
+                raw_items.extend(value)
+            elif isinstance(value, dict):
+                for nested_key in ["rising", "top", "queries", "topics", "items"]:
+                    nested_value = value.get(nested_key)
+                    if isinstance(nested_value, list):
+                        raw_items.extend(nested_value)
+
+        # Algunos payloads de SerpAPI anidan todo bajo `related_queries` o `related_topics`
+        data_root_key = "related_queries" if data_type == "RELATED_QUERIES" else "related_topics"
+        root_value = response.get(data_root_key)
+        if isinstance(root_value, dict):
+            for nested_key in ["rising", "top", "queries", "topics", "items"]:
+                nested_value = root_value.get(nested_key)
+                if isinstance(nested_value, list):
+                    raw_items.extend(nested_value)
+
+        normalized: List[Dict[str, Any]] = []
+        seen_terms = set()
+        for item in raw_items:
+            parsed = self._normalize_related_entry(item)
+            if not parsed:
+                continue
+            term_key = parsed["term"].strip().lower()
+            if not term_key or term_key in seen_terms:
+                continue
+            seen_terms.add(term_key)
+            normalized.append(parsed)
+
+        return normalized
+
+    @staticmethod
+    def _normalize_related_entry(item: Any) -> Dict[str, Any]:
+        if isinstance(item, str):
+            term = item.strip()
+            return {"term": term} if term else {}
+
+        if not isinstance(item, dict):
+            return {}
+
+        term = (
+            item.get("query")
+            or item.get("topic_title")
+            or item.get("title")
+            or item.get("name")
+            or item.get("topic")
+            or item.get("value")
+        )
+
+        if isinstance(term, dict):
+            term = term.get("query") or term.get("title") or term.get("name")
+
+        if term is None:
+            return {}
+
+        term_text = str(term).strip()
+        if not term_text:
+            return {}
+
+        normalized = {"term": term_text}
+
+        if "value" in item:
+            normalized["value"] = item.get("value")
+        if "formattedValue" in item:
+            normalized["formatted_value"] = item.get("formattedValue")
+        if "link" in item:
+            normalized["link"] = item.get("link")
+
+        return normalized

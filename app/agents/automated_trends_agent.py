@@ -19,6 +19,7 @@ from .agent_api_utils import (
     get_available_agents,
     get_agent_recent_articles,
     get_all_agents_recent_articles,
+    get_recent_finguru_articles,
     search_google_news,
     search_google_images,
     download_image_from_url
@@ -34,6 +35,7 @@ from .agent_content_utils import (
     _validate_and_parse_data
 )
 from .agent_profile import AgentProfile
+from .market_data_utils import get_market_data_snapshot
 from .trends_pipeline import TrendsPipeline
 
 load_env_files()
@@ -149,6 +151,44 @@ class AutomatedTrendsAgent:
             print(f"Tendencias guardadas en caché hasta: {(current_time + timedelta(minutes=self._cache_timeout_minutes)).strftime('%H:%M:%S')}")
         
         return trends_data
+
+    def _enrich_search_inputs(
+        self,
+        search_results: Dict[str, Any],
+        selected_trend: str,
+        trends_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Inyecta contexto relacionado y cotizaciones al paquete de contexto editorial."""
+        if not isinstance(search_results, dict):
+            search_results = {}
+
+        geo = "AR"
+        if isinstance(trends_data, dict):
+            geo = trends_data.get("geo", "AR") or "AR"
+
+        try:
+            related_context = self.trends_api.get_related_trend_context(
+                query=selected_trend,
+                geo=geo,
+                language="es-419",
+            )
+        except Exception as exc:
+            related_context = {
+                "status": "error",
+                "message": str(exc),
+                "query": selected_trend,
+                "related_queries": [],
+                "related_topics": [],
+            }
+
+        market_data = get_market_data_snapshot()
+        links_context = get_recent_finguru_articles(limit=5)
+        internal_links = links_context.get("articles", []) if isinstance(links_context, dict) else []
+
+        search_results["related_context"] = related_context
+        search_results["market_data"] = market_data
+        search_results["internal_links"] = internal_links
+        return search_results
 
     def publish_article(self, article_data: Dict[str, Any], trend_title: str, search_results: Dict[str, Any] = None) -> Dict[str, Any]:
         """Publica el artículo en fin.guru con imagen descargada"""
@@ -275,6 +315,24 @@ class AutomatedTrendsAgent:
                 'publishAs': '-1' if not article_data['publishAs'] else str(article_data['publishAs']),
                 'userId': str(self.agent_config.get('userId', 5822))
             }
+
+            # Envío opcional de metadata extendida para no romper integraciones actuales.
+            send_extended_seo = os.getenv("SEND_SEO_FIELDS_TO_API", "false").strip().lower() in {
+                "1", "true", "yes", "y", "on"
+            }
+            if send_extended_seo:
+                seo_metadata = article_data.get("seo_metadata", {})
+                if isinstance(seo_metadata, dict):
+                    if seo_metadata.get("slug"):
+                        data["slug"] = str(seo_metadata.get("slug"))
+                    if seo_metadata.get("meta_description"):
+                        data["metaDescription"] = str(seo_metadata.get("meta_description"))
+                    if seo_metadata.get("image_alt_text"):
+                        data["imageAltText"] = str(seo_metadata.get("image_alt_text"))
+
+                internal_links = article_data.get("internal_links", [])
+                if isinstance(internal_links, list) and internal_links:
+                    data["internalLinks"] = json.dumps(internal_links, ensure_ascii=False)
             
             print(f"   - Enviando datos: {data}")
             print(f"   - Con archivo: {filename}")
@@ -356,6 +414,7 @@ class AutomatedTrendsAgent:
             
             print("3. Buscando información adicional...")
             search_results = search_google_news(self, selected_trend)
+            search_results = self._enrich_search_inputs(search_results, selected_trend, trends_data)
             
             print("4. Creando prompt...")
             prompt = create_prompt(self, trends_data, search_results, selected_trend, topic_position)
@@ -385,7 +444,11 @@ class AutomatedTrendsAgent:
             print(f"   ✅ Profundidad validada: {depth_validation['depth_score']:.0f}/100")
             
             print("6. Procesando datos del artículo...")
-            article_data = process_article_data(article_content)
+            article_data = process_article_data(
+                article_content,
+                selected_trend=selected_trend,
+                search_results=search_results,
+            )
             
             print("7. Publicando artículo...")
             publish_result = self.publish_article(article_data, selected_trend, search_results)
@@ -651,6 +714,10 @@ TENDENCIAS ACTUALES (últimas 24h):
 
 🎯 OBJETIVO: ELEGIR UNA SOLA tendencia que sea MÁS RELEVANTE e INTERESANTE para el público argentino.
 
+💰 PRIORIDAD FIN.GURU (OBLIGATORIA):
+- Prioriza tendencias de economía, mercados, dólar, inflación, tasas, bancos, deuda, inversión y política fiscal.
+- Si una tendencia es masiva pero no financiera (farándula, reality, chimentos), debe descartarse.
+
 📋 CRITERIOS DE SELECCIÓN:
 {self.trending_prompt}
 
@@ -736,6 +803,30 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
                     "status": "no_suitable_topic",
                     "message": "No se encontró ningún tema que cumpla con los criterios de calidad",
                     "reason": selected_reason
+                }
+
+            selected_categories = []
+            if isinstance(selected_position, int):
+                trending_topics = trends_data.get("trending_topics", [])
+                if isinstance(trending_topics, list) and 1 <= selected_position <= len(trending_topics):
+                    selected_topic_payload = trending_topics[selected_position - 1]
+                    if isinstance(selected_topic_payload, dict):
+                        selected_categories = selected_topic_payload.get("categories", [])
+
+            financial_relevance = self.pipeline_v2.policy_engine.evaluate_financial_relevance(
+                selected_title,
+                selected_categories,
+            )
+
+            if not financial_relevance.get("allowed"):
+                print(f"   🚫 Tema rechazado por baja relevancia financiera: {selected_title}")
+                return {
+                    "status": "no_suitable_topic",
+                    "message": "Tema fuera de foco financiero para FinGuru",
+                    "reason": (
+                        f"Score financiero insuficiente ({financial_relevance.get('score', 0)}) "
+                        f"| hard_block_hits={financial_relevance.get('hard_block_hits', [])}"
+                    ),
                 }
 
             forbidden_hits = []
@@ -872,6 +963,7 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
             
             print("3. Buscando información adicional...")
             search_results = search_google_news(self, selected_trend)
+            search_results = self._enrich_search_inputs(search_results, selected_trend, trends_data)
             
             print("4. Creando prompt...")
             prompt = create_prompt(self, trends_data, search_results, selected_trend, topic_position)
@@ -904,7 +996,11 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
             print(f"   ✅ Profundidad validada: {depth_validation['depth_score']:.0f}/100")
             
             print("6. Procesando datos del artículo...")
-            article_data = process_article_data(article_content)
+            article_data = process_article_data(
+                article_content,
+                selected_trend=selected_trend,
+                search_results=search_results,
+            )
             
             print("7. Publicando artículo...")
             publish_result = self.publish_article(article_data, selected_trend, search_results)
