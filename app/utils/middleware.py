@@ -2,6 +2,7 @@ import httpx
 import os
 from fastapi import HTTPException, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.requests import Request
 
 security = HTTPBearer()
 
@@ -39,13 +40,6 @@ async def check_subscription(credentials: HTTPAuthorizationCredentials = Depends
             raise he
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error inesperado: {str(e)}")
-
-import httpx
-import os
-from fastapi import HTTPException, Depends, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-security = HTTPBearer()
 
 async def check_sudo_api_key(request: Request):
     """

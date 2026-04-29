@@ -1,5 +1,6 @@
 import os
-from fastapi import FastAPI, UploadFile, Response, HTTPException, Depends, Query, Request
+from fastapi import FastAPI, UploadFile, Response, HTTPException, Depends, Query
+from starlette.requests import Request
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel
@@ -152,8 +153,8 @@ db = None
 try:
     db = connect_to_mongo().db
 except Exception as e:
-    print(f"⚠️ MongoDB no disponible en arranque: {str(e)}")
-    print("⚠️ El endpoint /views quedará deshabilitado hasta que Mongo esté accesible")
+    print(f"[WARN] MongoDB no disponible en arranque: {str(e)}")
+    print("[WARN] El endpoint /views quedara deshabilitado hasta que Mongo este accesible")
 
 class ParamsToClaimTokens(BaseModel):
     id: int
