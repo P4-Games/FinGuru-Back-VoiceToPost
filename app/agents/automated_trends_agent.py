@@ -1041,6 +1041,7 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
         topic_position: int = None,
         dry_run: bool = False,
         request_correlation_id: Optional[str] = None,
+        agent_ids: Optional[List[int]] = None,
     ) -> Dict[str, Any]:
         """Ejecuta múltiples agentes bajo el contrato v2 con trazabilidad por ejecución."""
         try:
@@ -1049,6 +1050,23 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
 
             self._selected_trends_session.clear()
             self._selected_positions_session.clear()
+
+            requested_agent_ids: Optional[List[int]] = None
+            if agent_ids is not None:
+                seen = set()
+                normalized: List[int] = []
+                for aid in agent_ids:
+                    if aid not in seen:
+                        seen.add(aid)
+                        normalized.append(aid)
+                if not normalized:
+                    return {
+                        "status": "error",
+                        "contract_version": "v2",
+                        "correlation_id": request_correlation_id,
+                        "message": "agent_ids no puede ser una lista vacía; omita el campo para ejecutar todos los agentes",
+                    }
+                requested_agent_ids = normalized
 
             shared_trends_data = self.get_trending_topics()
             if shared_trends_data.get("status") != "success" or not shared_trends_data.get("trending_topics"):
@@ -1068,6 +1086,36 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
                     "message": "No se pudieron inicializar agentes",
                 }
 
+            if requested_agent_ids is not None:
+                loaded_ids = {a.agent_id for a in agents if a.agent_id is not None}
+                requested_set = set(requested_agent_ids)
+                unknown_agent_ids = sorted(requested_set - loaded_ids)
+                if unknown_agent_ids:
+                    return {
+                        "status": "error",
+                        "contract_version": "v2",
+                        "correlation_id": request_correlation_id,
+                        "message": (
+                            "Uno o más agent_ids no existen entre los agentes disponibles: "
+                            f"{unknown_agent_ids}"
+                        ),
+                        "unknown_agent_ids": unknown_agent_ids,
+                    }
+
+                order = {aid: i for i, aid in enumerate(requested_agent_ids)}
+                agents = sorted(
+                    [a for a in agents if a.agent_id in requested_set],
+                    key=lambda ag: order.get(ag.agent_id, 10**9),
+                )
+                if not agents:
+                    return {
+                        "status": "error",
+                        "contract_version": "v2",
+                        "correlation_id": request_correlation_id,
+                        "message": "No hay agentes para ejecutar tras aplicar agent_ids",
+                        "unknown_agent_ids": [],
+                    }
+
             results = []
             for agent in agents:
                 agent_correlation_id = f"{request_correlation_id}:{agent.agent_id}"
@@ -1083,19 +1131,22 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
             skipped = [r for r in results if r.get("status") == "skipped"]
             failed = [r for r in results if r.get("status") == "error"]
 
+            execution_payload = {
+                "topic_position": topic_position,
+                "dry_run": dry_run,
+                "agents_total": len(results),
+                "successful": len(successful),
+                "skipped": len(skipped),
+                "failed": len(failed),
+                "requested_agent_ids": requested_agent_ids,
+            }
+
             return {
                 "status": "success",
                 "contract_version": "v2",
                 "correlation_id": request_correlation_id,
                 "timestamp": datetime.now().isoformat(),
-                "execution": {
-                    "topic_position": topic_position,
-                    "dry_run": dry_run,
-                    "agents_total": len(results),
-                    "successful": len(successful),
-                    "skipped": len(skipped),
-                    "failed": len(failed),
-                },
+                "execution": execution_payload,
                 "results": results,
             }
         except Exception as e:
@@ -1119,12 +1170,14 @@ def run_multi_trends_agents_v2(
     topic_position: int = None,
     dry_run: bool = False,
     correlation_id: Optional[str] = None,
+    agent_ids: Optional[List[int]] = None,
 ):
     coordinator = AutomatedTrendsAgent()
     return coordinator.run_multi_agent_process_v2(
         topic_position=topic_position,
         dry_run=dry_run,
         request_correlation_id=correlation_id,
+        agent_ids=agent_ids,
     )
 
 def get_available_agents_standalone():

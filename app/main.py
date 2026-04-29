@@ -8,7 +8,7 @@ from utils.clean import clean_message
 from utils.auth import validate_token
 from load_env import load_env_files
 from utils.middleware import check_subscription, check_sudo_api_key
-from typing import Optional
+from typing import List, Optional
 from utils.trends_functions import TrendsAPI
 from agents.automated_trends_agent import (
     run_multi_trends_agents,
@@ -158,6 +158,7 @@ class MultiAgentV2Request(BaseModel):
     topic_position: Optional[int] = None
     dry_run: bool = False
     correlation_id: Optional[str] = None
+    agent_ids: Optional[List[int]] = None
 
 @app.post("/convert_text_v2")
 async def convert_text(data: TextInput, user: dict = Depends(check_subscription)):
@@ -271,6 +272,7 @@ async def get_trending_topics(
 @app.get("/run_multi_trends_agents")
 async def execute_multi_trends_agents(
     topic_position: Optional[int] = None,
+    agent_id: Optional[int] = None,
     sudo_check: dict = Depends(check_sudo_api_key)
 ):
     """
@@ -280,7 +282,7 @@ async def execute_multi_trends_agents(
     1. Obtiene los agentes disponibles desde NEXT_PUBLIC_API_URL/agent-ias
     2. Obtiene las tendencias UNA SOLA VEZ y las comparte entre todos los agentes
     3. Inicializa cada agente con su configuración única (personality, trending, format_markdown)
-    4. Ejecuta todos los agentes con las mismas tendencias cached
+    4. Ejecuta todos los agentes con las mismas tendencias cached (o solo agent_id si se indica)
     5. Publica los artículos automáticamente en fin.guru
     
     ⚡ AHORRO DE API: En lugar de 5+ llamadas a SerpAPI, solo hace 1 llamada cada 30 minutos.
@@ -290,16 +292,19 @@ async def execute_multi_trends_agents(
     
     Args:
         topic_position: Posición específica de tendencia (1-10) o None para auto-selección por ChatGPT
+        agent_id: Si se informa, ejecuta únicamente ese agente (útil para cronjobs por agente)
         sudo_check: Verificación de SUDO_API_KEY (inyectada automáticamente)
         
     Returns:
         dict: Resultado del proceso multi-agente con resumen de éxitos y fallos
     """
     try:
+        agent_ids = [agent_id] if agent_id is not None else None
         # Compatibilidad legacy para Google Scheduler: mismo endpoint, motor v2 interno.
         v2_result = run_multi_trends_agents_v2(
             topic_position=topic_position,
             dry_run=False,
+            agent_ids=agent_ids,
         )
 
         if v2_result.get("status") == "success":
@@ -318,11 +323,16 @@ async def execute_multi_trends_agents(
                     "successful": execution.get("successful", 0),
                     "failed": execution.get("failed", 0),
                     "skipped": execution.get("skipped", 0),
+                    "requested_agent_ids": execution.get("requested_agent_ids"),
                 },
                 "legacy_endpoint": True,
                 "engine_version": "v2",
                 "correlation_id": v2_result.get("correlation_id"),
             }
+
+        # Si se pidió un agente concreto, no usar legacy (ejecutaría a todos).
+        if agent_id is not None:
+            return v2_result
 
         # Fallback de seguridad al motor legacy si el v2 falla.
         legacy_result = run_multi_trends_agents(topic_position=topic_position)
@@ -347,12 +357,14 @@ async def execute_multi_trends_agents_v2(
     - parámetros efectivos del LLM
     - score de profundidad y policy checks
     - resultado de publicación
+    - agent_ids opcional: lista de IDs para ejecutar solo esos agentes (omitir = todos)
     """
     try:
         result = run_multi_trends_agents_v2(
             topic_position=payload.topic_position,
             dry_run=payload.dry_run,
             correlation_id=payload.correlation_id,
+            agent_ids=payload.agent_ids,
         )
         return result
     except Exception as e:
