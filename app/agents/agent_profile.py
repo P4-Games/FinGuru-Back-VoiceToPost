@@ -83,6 +83,17 @@ class AgentProfile:
         elif isinstance(user_data, dict) and "id" in user_data:
             user_id = user_data.get("id")
 
+        # Cuenta bajo la que debe publicarse en fin.guru (perfil del agente). Si existe en CMS,
+        # tiene prioridad sobre `user`, que suele ser el admin/creador del registro.
+        publish_user = _to_optional_int(
+            attributes.get("publishedAsUserId")
+            or attributes.get("publisherUserId")
+            or attributes.get("publisher_user_id")
+            or attributes.get("authorUserId")
+        )
+        if publish_user is not None:
+            user_id = publish_user
+
         return cls.from_flat_payload(
             {
                 "id": agent_item.get("id"),
@@ -119,10 +130,19 @@ class AgentProfile:
         if max_tokens > 3500:
             max_tokens = 3500
 
+        publisher_override = _to_optional_int(
+            payload.get("publishedAsUserId")
+            or payload.get("publisherUserId")
+            or payload.get("publisher_user_id")
+            or payload.get("authorUserId")
+        )
+        fallback_uid = _to_optional_int(payload.get("userId"))
+        effective_uid = publisher_override if publisher_override is not None else fallback_uid
+
         return cls(
             id=_to_optional_int(payload.get("id")),
             name=_to_text(payload.get("name"), "default-agent"),
-            user_id=_to_optional_int(payload.get("userId")),
+            user_id=effective_uid,
             personality=_to_text(
                 payload.get("personality"),
                 "Eres un periodista especializado en tendencias de Argentina que debe crear contenido en Markdown",

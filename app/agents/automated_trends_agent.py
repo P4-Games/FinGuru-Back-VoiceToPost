@@ -366,14 +366,26 @@ class AutomatedTrendsAgent:
                     "message": "ERROR CRÍTICO: Estructura de archivos inválida"
                 }
             
+            # fin.guru: publishAs=-1 suele resolver al usuario "por defecto" (ej. cuenta del integrador).
+            # Sin publishAs explícito en el artículo, alineamos publishAs al userId del agente para
+            # que el autor visible coincida con el perfil configurado en agent-ias.
+            _uid = self.agent_config.get("userId")
+            _explicit_pa = article_data.get("publishAs")
+            if _explicit_pa:
+                _publish_as = str(_explicit_pa)
+            elif _uid is not None:
+                _publish_as = str(_uid)
+            else:
+                _publish_as = "-1"
+
             data = {
                 'title': article_data['title'],
                 'excerpt': article_data['excerpt'],
                 'content': article_data['content'],
                 'category': article_data['category'],
                 'tags': article_data['tags'],
-                'publishAs': '-1' if not article_data['publishAs'] else str(article_data['publishAs']),
-                'userId': str(self.agent_config.get('userId', 5822))
+                'publishAs': _publish_as,
+                'userId': str(_uid if _uid is not None else 5822)
             }
 
             # Envío opcional de metadata extendida para no romper integraciones actuales.
