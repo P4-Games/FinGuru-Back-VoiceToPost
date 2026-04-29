@@ -366,14 +366,18 @@ class AutomatedTrendsAgent:
                     "message": "ERROR CRÍTICO: Estructura de archivos inválida"
                 }
             
-            # fin.guru: publishAs=-1 suele resolver al usuario "por defecto" (ej. cuenta del integrador).
-            # Sin publishAs explícito en el artículo, alineamos publishAs al userId del agente para
-            # que el autor visible coincida con el perfil configurado en agent-ias.
+            # publishAs=-1 es el valor que espera el route agent-publish-article cuando el autor
+            # efectivo viene en userId (ver documentación/API fin.guru). Forzar publishAs=userId puede
+            # provocar 500 si el backend valida combinaciones así.
+            # Opt-in: FIN_GURU_MATCH_PUBLISH_AS_TO_USER=true si el servidor soporta publicar con ambos alineados.
+            _match_publish_as = os.getenv("FIN_GURU_MATCH_PUBLISH_AS_TO_USER", "").strip().lower() in {
+                "1", "true", "yes", "y", "on",
+            }
             _uid = self.agent_config.get("userId")
             _explicit_pa = article_data.get("publishAs")
             if _explicit_pa:
                 _publish_as = str(_explicit_pa)
-            elif _uid is not None:
+            elif _match_publish_as and _uid is not None:
                 _publish_as = str(_uid)
             else:
                 _publish_as = "-1"

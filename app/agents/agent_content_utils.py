@@ -4,6 +4,7 @@ import html
 import string
 import random
 import hashlib
+import markdown as markdown_lib
 from typing import Dict, Any, List, Optional
 import unicodedata
 
@@ -1046,25 +1047,13 @@ def generate_article_content(agent, prompt: str) -> str:
         return ""
 
 def markdown_to_html(md: str) -> str:
-    """Convierte Markdown simple a HTML"""
-    html = md
-    html = html.replace('### ', '<h3>').replace('\n### ', '</h3>\n<h3>')
-    html = html.replace('## ', '<h2>').replace('\n## ', '</h2>\n<h2>')
-    html = html.replace('# ', '<h1>').replace('\n# ', '</h1>\n<h1>')
-    
-    html = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html)
-    html = re.sub(r'^- (.*)$', r'<li>\1</li>', html, flags=re.MULTILINE)
-    html = re.sub(r'\n{2,}', '</p>\n<p>', html)
-    html = html.replace('\n', '<br>')
-    
-    if not html.startswith('<'):
-        html = '<p>' + html
-    if not html.endswith('>'):
-        html = html + '</p>'
-    
-    html = re.sub(r'<h([123])>([^<]*?)(?=<|$)', r'<h\1>\2</h\1>', html)
-    
-    return html
+    """Convierte Markdown a HTML usando la librería `markdown` (HTML válido, sin `<p>` envolviendo `<h2>`, etc.)."""
+    if not isinstance(md, str) or not md.strip():
+        return ""
+    return markdown_lib.markdown(
+        md.strip(),
+        extensions=["extra"],
+    ).strip()
 
 
 def _slugify(text: str) -> str:
