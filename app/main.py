@@ -322,7 +322,6 @@ async def execute_multi_trends_agents(
     agent_ids: Annotated[
         Optional[List[int]],
         Query(
-            default=None,
             description="Igual que en POST /v2/trends/agents/run. Ej.: ?agent_ids=5 o ?agent_ids=1&agent_ids=2",
         ),
     ] = None,
