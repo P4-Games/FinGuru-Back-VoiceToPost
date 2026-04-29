@@ -28,6 +28,16 @@ def _to_int(value: Any, default: int) -> int:
         return default
 
 
+def _to_optional_int(value: Any) -> Optional[int]:
+    """IDs desde la API pueden venir como str; unificamos a int para comparaciones."""
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize_string_list(value: Any) -> List[str]:
     if value is None:
         return []
@@ -110,9 +120,9 @@ class AgentProfile:
             max_tokens = 3500
 
         return cls(
-            id=payload.get("id"),
+            id=_to_optional_int(payload.get("id")),
             name=_to_text(payload.get("name"), "default-agent"),
-            user_id=payload.get("userId"),
+            user_id=_to_optional_int(payload.get("userId")),
             personality=_to_text(
                 payload.get("personality"),
                 "Eres un periodista especializado en tendencias de Argentina que debe crear contenido en Markdown",

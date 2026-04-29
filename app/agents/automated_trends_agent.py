@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 from openai import OpenAI
 from utils.trends_functions import TrendsAPI
@@ -34,11 +34,71 @@ from .agent_content_utils import (
     _extract_trend_title,
     _validate_and_parse_data
 )
-from .agent_profile import AgentProfile
+from .agent_profile import AgentProfile, _to_optional_int
 from .market_data_utils import get_market_data_snapshot
 from .trends_pipeline import TrendsPipeline
 
 load_env_files()
+
+
+def _normalize_agent_id_params(agent_ids: Optional[List[Any]]) -> List[int]:
+    """Normaliza IDs desde query/body (pueden llegar como str). Lista vacía => []."""
+    if agent_ids is None:
+        return []
+    seen = set()
+    out: List[int] = []
+    for aid in agent_ids:
+        nid = _to_optional_int(aid)
+        if nid is None or nid in seen:
+            continue
+        seen.add(nid)
+        out.append(nid)
+    return out
+
+
+def _filter_agents_core(
+    agents: List["AutomatedTrendsAgent"],
+    requested_agent_ids: List[int],
+) -> Tuple[Optional[List["AutomatedTrendsAgent"]], Optional[List[int]], bool]:
+    """
+    Filtra instancias por IDs solicitados.
+    Devuelve (lista_filtrada, ids_desconocidos, vacío_tras_filtro).
+    Éxito: (agents, None, False); ids desconocidos: (None, [...], False); sin coincidencias: (None, None, True).
+    """
+    loaded_ids = {
+        _to_optional_int(a.agent_id)
+        for a in agents
+        if _to_optional_int(a.agent_id) is not None
+    }
+    requested_set = set(requested_agent_ids)
+    unknown_agent_ids = sorted(requested_set - loaded_ids)
+    if unknown_agent_ids:
+        return None, unknown_agent_ids, False
+
+    order = {aid: i for i, aid in enumerate(requested_agent_ids)}
+    filtered = sorted(
+        [a for a in agents if _to_optional_int(a.agent_id) in requested_set],
+        key=lambda ag: order.get(_to_optional_int(ag.agent_id), 10**9),
+    )
+    if not filtered:
+        return None, None, True
+    return filtered, None, False
+
+
+def _narrow_agents_to_requested_ids(
+    agents: List["AutomatedTrendsAgent"],
+    requested_agent_ids: List[int],
+):
+    """Como _filter_agents_core pero lanza ValueError si no hay resultado válido (uso motor legacy)."""
+    filtered, unknown, empty = _filter_agents_core(agents, requested_agent_ids)
+    if unknown is not None:
+        raise ValueError(
+            f"No existen estos agent_ids entre los disponibles: {unknown}"
+        )
+    if empty:
+        raise ValueError("No hay agentes para ejecutar tras aplicar agent_ids")
+    return filtered
+
 
 class AutomatedTrendsAgent:
     _trends_cache = {}
@@ -58,7 +118,7 @@ class AutomatedTrendsAgent:
         
         profile = AgentProfile.from_flat_payload(agent_config or {})
         self.agent_config = profile.to_agent_dict()
-        self.agent_id = self.agent_config.get('id')
+        self.agent_id = _to_optional_int(self.agent_config.get("id"))
         self.agent_name = self.agent_config.get('name', 'default-agent')
         self.personality = self.agent_config.get('personality', 'Eres un periodista especializado en tendencias de Argentina que debe crear contenido en Markdown')
         self.trending_prompt = self.agent_config.get('trending', 'Considera: - Relevancia para Argentina - Potencial de generar interés - Actualidad e importancia - Impacto social, económico o cultural')
@@ -466,7 +526,9 @@ class AutomatedTrendsAgent:
             print(error_msg)
             return {"status": "error", "message": error_msg}
     
-    def run_multi_agent_process(self, topic_position: int = None) -> Dict[str, Any]:
+    def run_multi_agent_process(
+        self, topic_position: int = None, agent_ids: Optional[List[int]] = None
+    ) -> Dict[str, Any]:
         """Ejecuta múltiples agentes en paralelo usando sus configuraciones únicas"""
         try:
             print(f"[{datetime.now()}] Iniciando proceso multi-agente...")
@@ -487,6 +549,15 @@ class AutomatedTrendsAgent:
             
             if not agents:
                 return {"status": "error", "message": "No se pudieron inicializar agentes"}
+
+            narrowed_ids = _normalize_agent_id_params(agent_ids)
+            requested_for_summary: Optional[List[int]] = None
+            if narrowed_ids:
+                try:
+                    agents = _narrow_agents_to_requested_ids(agents, narrowed_ids)
+                    requested_for_summary = narrowed_ids
+                except ValueError as e:
+                    return {"status": "error", "message": str(e)}
             
             print(f"Ejecutando proceso con {len(agents)} agentes...")
             
@@ -556,18 +627,22 @@ class AutomatedTrendsAgent:
                     reason = skipped.get("reason", "No especificado")
                     print(f"      - {agent_name}: {reason[:100]}...")
             
+            summary_legacy = {
+                "total_agents": len(all_results),
+                "successful": len(successful_agents),
+                "failed": len(failed_agents),
+                "skipped": len(skipped_agents),
+                "unique_trends_used": len(self._selected_trends_session),
+                "trends_selected": list(self._selected_trends_session),
+            }
+            if requested_for_summary is not None:
+                summary_legacy["requested_agent_ids"] = requested_for_summary
+            
             return {
                 "status": "success",
                 "message": f"Proceso multi-agente completado: {len(successful_agents)} exitosos, {len(skipped_agents)} omitidos, {len(failed_agents)} fallidos",
                 "results": all_results,
-                "summary": {
-                    "total_agents": len(all_results),
-                    "successful": len(successful_agents),
-                    "failed": len(failed_agents),
-                    "skipped": len(skipped_agents),
-                    "unique_trends_used": len(self._selected_trends_session),
-                    "trends_selected": list(self._selected_trends_session)
-                }
+                "summary": summary_legacy,
             }
             
         except Exception as e:
@@ -1053,12 +1128,7 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
 
             requested_agent_ids: Optional[List[int]] = None
             if agent_ids is not None:
-                seen = set()
-                normalized: List[int] = []
-                for aid in agent_ids:
-                    if aid not in seen:
-                        seen.add(aid)
-                        normalized.append(aid)
+                normalized = _normalize_agent_id_params(agent_ids)
                 if not normalized:
                     return {
                         "status": "error",
@@ -1087,10 +1157,10 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
                 }
 
             if requested_agent_ids is not None:
-                loaded_ids = {a.agent_id for a in agents if a.agent_id is not None}
-                requested_set = set(requested_agent_ids)
-                unknown_agent_ids = sorted(requested_set - loaded_ids)
-                if unknown_agent_ids:
+                filtered, unknown_agent_ids, empty_after_filter = _filter_agents_core(
+                    agents, requested_agent_ids
+                )
+                if unknown_agent_ids is not None:
                     return {
                         "status": "error",
                         "contract_version": "v2",
@@ -1101,13 +1171,7 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
                         ),
                         "unknown_agent_ids": unknown_agent_ids,
                     }
-
-                order = {aid: i for i, aid in enumerate(requested_agent_ids)}
-                agents = sorted(
-                    [a for a in agents if a.agent_id in requested_set],
-                    key=lambda ag: order.get(ag.agent_id, 10**9),
-                )
-                if not agents:
+                if empty_after_filter:
                     return {
                         "status": "error",
                         "contract_version": "v2",
@@ -1115,6 +1179,7 @@ RAZÓN: Las tendencias disponibles hablan exactamente de los mismos eventos espe
                         "message": "No hay agentes para ejecutar tras aplicar agent_ids",
                         "unknown_agent_ids": [],
                     }
+                agents = filtered
 
             results = []
             for agent in agents:
@@ -1161,9 +1226,9 @@ def run_trends_agent(topic_position: int = None):
     agent = AutomatedTrendsAgent()
     return agent.run_automated_process(topic_position)
 
-def run_multi_trends_agents(topic_position: int = None):
+def run_multi_trends_agents(topic_position: int = None, agent_ids: Optional[List[int]] = None):
     coordinator = AutomatedTrendsAgent()
-    return coordinator.run_multi_agent_process(topic_position)
+    return coordinator.run_multi_agent_process(topic_position, agent_ids=agent_ids)
 
 
 def run_multi_trends_agents_v2(

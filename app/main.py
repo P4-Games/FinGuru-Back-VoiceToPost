@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, UploadFile, Response, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, Response, HTTPException, Depends, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel
@@ -8,7 +8,7 @@ from utils.clean import clean_message
 from utils.auth import validate_token
 from load_env import load_env_files
 from utils.middleware import check_subscription, check_sudo_api_key
-from typing import List, Optional
+from typing import Annotated, List, Optional
 from utils.trends_functions import TrendsAPI
 from agents.automated_trends_agent import (
     run_multi_trends_agents,
@@ -28,9 +28,53 @@ app = FastAPI(
     version= "0.1"
 )
 
-origins = ["*"]  
-methods = ["*"]  
-headers = ["*"]  
+def _parse_int_list_from_query_text(value: str) -> List[int]:
+    out: List[int] = []
+    for piece in str(value).replace(" ", "").split(","):
+        if not piece:
+            continue
+        try:
+            out.append(int(piece))
+        except ValueError:
+            continue
+    return out
+
+
+def resolve_run_multi_agent_query_ids(
+    request: Request,
+    agent_id: Optional[int],
+    agent_ids_q: Optional[List[int]],
+) -> Optional[List[int]]:
+    """
+    Construye la lista de IDs efectiva para /run_multi_trends_agents.
+    Si FastAPI no enlaza el query (proxies, firmas de URL, etc.), lee request.query_params.
+    """
+    if agent_ids_q is not None and len(agent_ids_q) > 0:
+        return list(dict.fromkeys(agent_ids_q))
+    if agent_id is not None:
+        return [agent_id]
+
+    qp = request.query_params
+    raw_single = qp.get("agent_id") or qp.get("agentId")
+    if raw_single is not None and str(raw_single).strip() != "":
+        parsed_list = _parse_int_list_from_query_text(str(raw_single))
+        if parsed_list:
+            return list(dict.fromkeys(parsed_list))
+
+    merged: List[int] = []
+    for key in ("agent_ids", "agentIds"):
+        for item in qp.getlist(key):
+            merged.extend(_parse_int_list_from_query_text(item))
+    merged = [x for x in merged if x is not None]
+    if merged:
+        return list(dict.fromkeys(merged))
+
+    return None
+
+
+origins = ["*"]
+methods = ["*"]
+headers = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -271,9 +315,17 @@ async def get_trending_topics(
 
 @app.get("/run_multi_trends_agents")
 async def execute_multi_trends_agents(
+    request: Request,
     topic_position: Optional[int] = None,
     agent_id: Optional[int] = None,
-    sudo_check: dict = Depends(check_sudo_api_key)
+    agent_ids: Annotated[
+        Optional[List[int]],
+        Query(
+            default=None,
+            description="Igual que en POST /v2/trends/agents/run. Ej.: ?agent_ids=5 o ?agent_ids=1&agent_ids=2",
+        ),
+    ] = None,
+    sudo_check: dict = Depends(check_sudo_api_key),
 ):
     """
     🚀 ENDPOINT OPTIMIZADO: Ejecuta múltiples agentes con caché inteligente de tendencias.
@@ -282,7 +334,7 @@ async def execute_multi_trends_agents(
     1. Obtiene los agentes disponibles desde NEXT_PUBLIC_API_URL/agent-ias
     2. Obtiene las tendencias UNA SOLA VEZ y las comparte entre todos los agentes
     3. Inicializa cada agente con su configuración única (personality, trending, format_markdown)
-    4. Ejecuta todos los agentes con las mismas tendencias cached (o solo agent_id si se indica)
+    4. Ejecuta todos los agentes con las mismas tendencias cached (o solo los indicados en agent_id / agent_ids)
     5. Publica los artículos automáticamente en fin.guru
     
     ⚡ AHORRO DE API: En lugar de 5+ llamadas a SerpAPI, solo hace 1 llamada cada 30 minutos.
@@ -292,19 +344,20 @@ async def execute_multi_trends_agents(
     
     Args:
         topic_position: Posición específica de tendencia (1-10) o None para auto-selección por ChatGPT
-        agent_id: Si se informa, ejecuta únicamente ese agente (útil para cronjobs por agente)
+        agent_id: Un solo agente (legacy). Equivalente a ?agent_ids=ID
+        agent_ids: Lista de IDs (nombre alineado con POST). Tiene precedencia sobre agent_id si ambos se envían
         sudo_check: Verificación de SUDO_API_KEY (inyectada automáticamente)
         
     Returns:
         dict: Resultado del proceso multi-agente con resumen de éxitos y fallos
     """
     try:
-        agent_ids = [agent_id] if agent_id is not None else None
+        resolved_ids = resolve_run_multi_agent_query_ids(request, agent_id, agent_ids)
         # Compatibilidad legacy para Google Scheduler: mismo endpoint, motor v2 interno.
         v2_result = run_multi_trends_agents_v2(
             topic_position=topic_position,
             dry_run=False,
-            agent_ids=agent_ids,
+            agent_ids=resolved_ids,
         )
 
         if v2_result.get("status") == "success":
@@ -330,12 +383,15 @@ async def execute_multi_trends_agents(
                 "correlation_id": v2_result.get("correlation_id"),
             }
 
-        # Si se pidió un agente concreto, no usar legacy (ejecutaría a todos).
-        if agent_id is not None:
+        # Si se pidieron agentes concretos, no usar legacy (ejecutaría a todos).
+        if resolved_ids is not None:
             return v2_result
 
-        # Fallback de seguridad al motor legacy si el v2 falla.
-        legacy_result = run_multi_trends_agents(topic_position=topic_position)
+        # Fallback de seguridad al motor legacy si el v2 falla (respeta agent_ids si hubo intención explícita).
+        legacy_result = run_multi_trends_agents(
+            topic_position=topic_position,
+            agent_ids=resolved_ids,
+        )
         legacy_result["engine_version"] = "legacy-fallback"
         return legacy_result
     except Exception as e:
